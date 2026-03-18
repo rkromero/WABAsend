@@ -1,0 +1,41 @@
+# railway.toml — WABA Sender
+# Define dos servicios separados: backend y frontend.
+# Railway detecta este archivo y configura el deploy automáticamente.
+
+[build]
+  builder = "NIXPACKS"
+
+# ─── Servicio backend ──────────────────────────────────────────────────────────
+# Configurar en Railway con las variables:
+#   DATABASE_URL    → Railway lo inyecta automáticamente al linkear Postgres
+#   PORT            → 3001
+#   FRONTEND_URL    → URL del servicio frontend (para CORS)
+
+[[services]]
+  name = "backend"
+  rootDirectory = "backend"
+
+  [services.build]
+    buildCommand = "npm install"
+
+  [services.deploy]
+    startCommand = "npm start"
+    healthcheckPath = "/health"
+    healthcheckTimeout = 30
+    restartPolicyType = "ON_FAILURE"
+    restartPolicyMaxRetries = 3
+
+# ─── Servicio frontend ─────────────────────────────────────────────────────────
+# Configurar en Railway con las variables:
+#   VITE_API_URL → URL pública del servicio backend (ej: https://waba-backend.railway.app)
+
+[[services]]
+  name = "frontend"
+  rootDirectory = "frontend"
+
+  [services.build]
+    buildCommand = "npm install && npm run build"
+
+  [services.deploy]
+    startCommand = "npx serve -s dist -l $PORT"
+    restartPolicyType = "ON_FAILURE"
