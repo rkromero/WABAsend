@@ -108,7 +108,7 @@ router.post('/bulk', async (req, res) => {
         await query(
           `INSERT INTO contacts (nombre, telefono)
            VALUES ($1, $2)
-           ON CONFLICT (telefono) DO UPDATE SET nombre = $1`,
+           ON CONFLICT (telefono) DO UPDATE SET nombre = EXCLUDED.nombre`,
           [nombre, telefono]
         );
         imported++;
