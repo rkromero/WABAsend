@@ -5,6 +5,7 @@
  */
 
 import { Router } from 'express';
+import axios from 'axios';
 import { query } from '../db/index.js';
 import { syncProducts } from '../services/woocommerce.js';
 
@@ -72,6 +73,81 @@ router.get('/stats', async (req, res) => {
       FROM waba_products
     `);
     res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/products/db-check — cuántos productos tienen imagen_url en la DB
+router.get('/db-check', async (req, res) => {
+  try {
+    const result = await query(`
+      SELECT
+        COUNT(*)                                     AS total,
+        COUNT(*) FILTER (WHERE imagen_url IS NOT NULL) AS con_imagen,
+        COUNT(*) FILTER (WHERE imagen_url IS NULL)     AS sin_imagen,
+        COUNT(*) FILTER (WHERE descripcion_vision IS NOT NULL) AS con_vision
+      FROM waba_products WHERE activo = true
+    `);
+    // Mostrar también un ejemplo de producto con y sin imagen
+    const ejemplo = await query(`
+      SELECT woo_id, nombre, imagen_url, tipo
+      FROM waba_products
+      WHERE activo = true
+      LIMIT 3
+    `);
+    res.json({ success: true, data: { stats: result.rows[0], ejemplos: ejemplo.rows } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/products/woo-debug — inspecciona la respuesta cruda de WooCommerce para 1 producto
+// Útil para diagnosticar la estructura de campos image/images
+router.get('/woo-debug', async (req, res) => {
+  const url    = process.env.WOOCOMMERCE_URL;
+  const key    = process.env.WOOCOMMERCE_KEY;
+  const secret = process.env.WOOCOMMERCE_SECRET;
+
+  if (!url || !key || !secret) {
+    return res.status(400).json({ success: false, error: 'Variables de WooCommerce no configuradas' });
+  }
+
+  try {
+    const client = axios.create({
+      baseURL: `${url.replace(/\/$/, '')}/wp-json/wc/v3`,
+      auth: { username: key, password: secret },
+      timeout: 15000,
+    });
+
+    // Traer 1 producto de cada tipo para ver la estructura real
+    const [simpleRes, variableRes] = await Promise.all([
+      client.get('/products', { params: { status: 'publish', per_page: 1, type: 'simple' } }),
+      client.get('/products', { params: { status: 'publish', per_page: 1, type: 'variable' } }),
+    ]);
+
+    const simple   = simpleRes.data?.[0];
+    const variable = variableRes.data?.[0];
+
+    // Extraer solo los campos relevantes para el diagnóstico
+    const extract = (p) => p ? {
+      id: p.id,
+      name: p.name,
+      type: p.type,
+      images_count: p.images?.length ?? 'campo inexistente',
+      images_0_src: p.images?.[0]?.src ?? null,
+      image_src: p.image?.src ?? null,         // campo singular (variantes)
+      stock_status: p.stock_status,
+      stock_quantity: p.stock_quantity,
+    } : null;
+
+    res.json({
+      success: true,
+      data: {
+        simple:   extract(simple),
+        variable: extract(variable),
+      },
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
