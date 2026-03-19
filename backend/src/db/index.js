@@ -103,7 +103,8 @@ export async function initSchema() {
   // Esto maneja tablas creadas previamente con schema incompleto
   const migrations = [
     // contacts
-    `ALTER TABLE contacts ADD COLUMN IF NOT EXISTS nombre VARCHAR(255) NOT NULL DEFAULT 'Sin nombre'`,
+    `ALTER TABLE contacts ADD COLUMN IF NOT EXISTS nombre   VARCHAR(255) NOT NULL DEFAULT 'Sin nombre'`,
+    `ALTER TABLE contacts ADD COLUMN IF NOT EXISTS telefono VARCHAR(20)  UNIQUE`,
 
     // campaigns
     `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS nombre            VARCHAR(255) NOT NULL DEFAULT 'Campaña'`,
