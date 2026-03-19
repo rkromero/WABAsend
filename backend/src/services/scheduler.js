@@ -20,22 +20,22 @@ let isRunning = false;
 
 /**
  * Ejecuta una campaña: envía mensajes a todos sus contactos.
- * Actualiza el estado de cada mensaje en message_logs y los contadores en campaigns.
+ * Actualiza el estado de cada mensaje en waba_message_logs y los contadores en waba_campaigns.
  *
- * @param {Object} campaign - Fila de la tabla campaigns
+ * @param {Object} campaign - Fila de la tabla waba_campaigns
  */
 async function executeCampaign(campaign) {
   console.log(`[Scheduler] Iniciando campaña #${campaign.id}: "${campaign.nombre}"`);
 
   // Marcar campaña como running
   await query(
-    "UPDATE campaigns SET status = 'running' WHERE id = $1",
+    "UPDATE waba_campaigns SET status = 'running' WHERE id = $1",
     [campaign.id]
   );
 
   // Obtener todos los mensajes pendientes de esta campaña
   const logsResult = await query(
-    "SELECT * FROM message_logs WHERE campaign_id = $1 AND status = 'pending'",
+    "SELECT * FROM waba_message_logs WHERE campaign_id = $1 AND status = 'pending'",
     [campaign.id]
   );
 
@@ -56,7 +56,7 @@ async function executeCampaign(campaign) {
 
       // Actualizar log con el ID de WhatsApp y estado sent
       await query(
-        `UPDATE message_logs
+        `UPDATE waba_message_logs
          SET status = 'sent', whatsapp_message_id = $1, sent_at = NOW(), updated_at = NOW()
          WHERE id = $2`,
         [messageId, log.id]
@@ -69,7 +69,7 @@ async function executeCampaign(campaign) {
       const errorMsg = err.response?.data?.error?.message || err.message;
 
       await query(
-        `UPDATE message_logs
+        `UPDATE waba_message_logs
          SET status = 'failed', error_message = $1, updated_at = NOW()
          WHERE id = $2`,
         [errorMsg.substring(0, 500), log.id]
@@ -85,7 +85,7 @@ async function executeCampaign(campaign) {
 
   // Actualizar contadores y marcar campaña como completed
   await query(
-    `UPDATE campaigns
+    `UPDATE waba_campaigns
      SET status = 'completed',
          sent_count = sent_count + $1,
          failed_count = failed_count + $2
@@ -111,7 +111,7 @@ async function checkAndRunScheduledCampaigns() {
   isRunning = true;
   try {
     const result = await query(
-      `SELECT * FROM campaigns
+      `SELECT * FROM waba_campaigns
        WHERE status = 'scheduled' AND scheduled_at <= NOW()
        ORDER BY scheduled_at ASC`
     );
@@ -129,7 +129,7 @@ async function checkAndRunScheduledCampaigns() {
         // Si falla la campaña entera, marcarla como failed
         console.error(`[Scheduler] Error crítico en campaña #${campaign.id}:`, err.message);
         await query(
-          "UPDATE campaigns SET status = 'failed' WHERE id = $1",
+          "UPDATE waba_campaigns SET status = 'failed' WHERE id = $1",
           [campaign.id]
         );
       }

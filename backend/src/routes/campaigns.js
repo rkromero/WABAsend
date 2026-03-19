@@ -2,6 +2,9 @@
  * Rutas de campañas
  * Autor: Turnio
  * Fecha: 2026-03-18
+ *
+ * Usa waba_campaigns y waba_message_logs para evitar colisión
+ * con las tablas propias de Chatwoot en la misma base de datos.
  */
 
 import { Router } from 'express';
@@ -15,7 +18,7 @@ router.get('/', async (req, res) => {
     const result = await query(
       `SELECT id, nombre, template_name, template_language, scheduled_at, status,
               total_contacts, sent_count, delivered_count, read_count, failed_count, created_at
-       FROM campaigns
+       FROM waba_campaigns
        ORDER BY created_at DESC
        LIMIT 100`
     );
@@ -37,7 +40,7 @@ router.get('/stats', async (req, res) => {
            COUNT(*) FILTER (WHERE status = 'completed')  AS completed,
            COUNT(*) FILTER (WHERE status = 'failed')     AS failed,
            COUNT(*) AS total
-         FROM campaigns`
+         FROM waba_campaigns`
       ),
       query(
         `SELECT
@@ -46,7 +49,7 @@ router.get('/stats', async (req, res) => {
            COUNT(*) FILTER (WHERE status = 'read')      AS read,
            COUNT(*) FILTER (WHERE status = 'failed')    AS failed,
            COUNT(*) AS total
-         FROM message_logs`
+         FROM waba_message_logs`
       ),
     ]);
 
@@ -70,10 +73,10 @@ router.get('/:id', async (req, res) => {
 
   try {
     const [campaignResult, logsResult] = await Promise.all([
-      query('SELECT * FROM campaigns WHERE id = $1', [id]),
+      query('SELECT * FROM waba_campaigns WHERE id = $1', [id]),
       query(
         `SELECT id, nombre, telefono, status, whatsapp_message_id, error_message, sent_at, updated_at
-         FROM message_logs
+         FROM waba_message_logs
          WHERE campaign_id = $1
          ORDER BY id ASC`,
         [id]
@@ -135,7 +138,7 @@ router.post('/', async (req, res) => {
 
     // Crear la campaña
     const campaignResult = await query(
-      `INSERT INTO campaigns (nombre, template_name, template_language, scheduled_at, total_contacts)
+      `INSERT INTO waba_campaigns (nombre, template_name, template_language, scheduled_at, total_contacts)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
       [nombre.trim(), template_name, template_language, scheduledDate, contacts.length]
@@ -146,7 +149,7 @@ router.post('/', async (req, res) => {
     // Crear un message_log por cada contacto
     for (const contact of contacts) {
       await query(
-        `INSERT INTO message_logs (campaign_id, contact_id, telefono, nombre, status)
+        `INSERT INTO waba_message_logs (campaign_id, contact_id, telefono, nombre, status)
          VALUES ($1, $2, $3, $4, 'pending')`,
         [campaign.id, contact.id, contact.telefono, contact.nombre]
       );
@@ -165,7 +168,7 @@ router.delete('/:id', async (req, res) => {
   if (isNaN(id)) return res.status(400).json({ success: false, error: 'ID inválido' });
 
   try {
-    const check = await query("SELECT status FROM campaigns WHERE id = $1", [id]);
+    const check = await query("SELECT status FROM waba_campaigns WHERE id = $1", [id]);
     if (check.rows.length === 0) {
       return res.status(404).json({ success: false, error: 'Campaña no encontrada' });
     }
@@ -176,7 +179,7 @@ router.delete('/:id', async (req, res) => {
       });
     }
 
-    await query('DELETE FROM campaigns WHERE id = $1', [id]);
+    await query('DELETE FROM waba_campaigns WHERE id = $1', [id]);
     res.json({ success: true, data: { deleted: id } });
   } catch (err) {
     console.error('[Campaigns] DELETE error:', err.message);

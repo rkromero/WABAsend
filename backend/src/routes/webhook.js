@@ -192,7 +192,7 @@ async function processStatusUpdate(status) {
 
   // Buscar el log por el ID de mensaje de WhatsApp
   const logResult = await query(
-    'SELECT id, campaign_id, status FROM message_logs WHERE whatsapp_message_id = $1',
+    'SELECT id, campaign_id, status FROM waba_message_logs WHERE whatsapp_message_id = $1',
     [waMessageId]
   );
 
@@ -215,7 +215,7 @@ async function processStatusUpdate(status) {
 
   // Actualizar el log
   await query(
-    `UPDATE message_logs
+    `UPDATE waba_message_logs
      SET status = $1, updated_at = NOW()
      WHERE id = $2`,
     [newStatus, log.id]
@@ -230,7 +230,7 @@ async function processStatusUpdate(status) {
 
   if (counterColumn) {
     await query(
-      `UPDATE campaigns SET ${counterColumn} = ${counterColumn} + 1 WHERE id = $1`,
+      `UPDATE waba_campaigns SET ${counterColumn} = ${counterColumn} + 1 WHERE id = $1`,
       [log.campaign_id]
     );
   }
