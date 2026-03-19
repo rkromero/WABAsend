@@ -42,6 +42,15 @@ router.post('/webhook', async (req, res) => {
       return;
     }
 
+    // Si el mensaje fue creado por nuestra app (inbox route), lo ignoramos
+    // para evitar duplicados. Nuestra app ya envía el WhatsApp antes de crear
+    // el mensaje en Chatwoot. Solo procesamos mensajes creados desde la UI de Chatwoot.
+    const createdByApp = event.content_attributes?.created_by_app === true;
+    if (createdByApp) {
+      console.debug('[ChatwootWebhook] Mensaje creado por la app, ignorando para evitar duplicado');
+      return;
+    }
+
     const conversationId = event.conversation?.id;
     const messageText = event.content;
 

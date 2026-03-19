@@ -123,8 +123,10 @@ export async function sendMessageToConversation(conversationId, message, message
     const res = await chatwootClient.post(`/conversations/${conversationId}/messages`, {
       content: message,
       message_type: messageType,
-      // private: false para que sea visible en la conversación
       private: false,
+      // Marca para que el webhook de Chatwoot sepa que este mensaje
+      // ya fue enviado por WhatsApp desde nuestra app y no lo reenvíe
+      content_attributes: { created_by_app: true },
     });
 
     console.debug(`[Chatwoot] Mensaje enviado a conversación ${conversationId} (type: ${messageType})`);
