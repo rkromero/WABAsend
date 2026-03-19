@@ -137,7 +137,7 @@ export async function initSchema() {
     }
   }
 
-  // 3. Índices
+  // 3. Índices y constraints
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_message_logs_campaign_id
       ON message_logs(campaign_id);
@@ -146,6 +146,17 @@ export async function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_incoming_messages_telefono
       ON incoming_messages(telefono);
   `);
+
+  // 4. Unique index en contacts.telefono (por separado para manejar el caso
+  //    donde la columna ya existía sin constraint)
+  try {
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS contacts_telefono_unique
+        ON contacts(telefono) WHERE telefono IS NOT NULL;
+    `);
+  } catch (err) {
+    console.warn('[DB] contacts_telefono_unique warning:', err.message.split('\n')[0]);
+  }
 
   console.log('[DB] Esquema inicializado correctamente');
 }
