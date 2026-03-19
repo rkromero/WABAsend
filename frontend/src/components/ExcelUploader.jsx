@@ -33,17 +33,18 @@ export default function ExcelUploader({ onImported }) {
             Object.entries(row).map(([k, v]) => [k.toLowerCase().trim(), String(v).trim()])
           );
 
-            const nombre   = normalized['nombre'] || normalized['name'] || '';
+          const nombre   = normalized['nombre'] || normalized['name'] || '';
           const telefono = (normalized['telefono'] || normalized['phone'] || normalized['tel'] || '')
             .replace(/\D/g, '');
           const email    = (normalized['email'] || normalized['correo'] || normalized['mail'] || '').toLowerCase().trim();
+          const segmento = (normalized['segmento'] || normalized['segment'] || normalized['categoria'] || '').trim();
 
           if (!nombre) {
             errors.push({ fila: i + 2, problema: 'Nombre vacío', telefono });
           } else if (telefono.length < 10 || telefono.length > 15) {
             errors.push({ fila: i + 2, problema: `Teléfono inválido: "${telefono}"`, nombre });
           } else {
-            contacts.push({ nombre, telefono, email: email || null });
+            contacts.push({ nombre, telefono, email: email || null, segmento: segmento || null });
           }
         });
 
@@ -174,7 +175,7 @@ export default function ExcelUploader({ onImported }) {
           </p>
           <p className="text-xs text-gray-600 mt-3">
             Columnas requeridas: <code className="text-accent/80">nombre</code>, <code className="text-accent/80">telefono</code>
-            {' '}· Opcional: <code className="text-accent/80">email</code> (para tracking de conversiones)
+            {' '}· Opcionales: <code className="text-accent/80">email</code>, <code className="text-accent/80">segmento</code>
           </p>
         </div>
       )}
@@ -210,7 +211,8 @@ export default function ExcelUploader({ onImported }) {
                   <tr className="text-left text-xs text-gray-500">
                     <th className="pb-2 pr-4">Nombre</th>
                     <th className="pb-2 pr-4">Teléfono</th>
-                    <th className="pb-2">Email</th>
+                    <th className="pb-2 pr-4">Email</th>
+                    <th className="pb-2">Segmento</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-base-border">
@@ -218,7 +220,13 @@ export default function ExcelUploader({ onImported }) {
                     <tr key={i}>
                       <td className="py-2 pr-4 text-gray-200">{c.nombre}</td>
                       <td className="py-2 pr-4 text-gray-400 font-mono text-xs">{c.telefono}</td>
-                      <td className="py-2 text-gray-400 text-xs">{c.email || <span className="text-gray-600">—</span>}</td>
+                      <td className="py-2 pr-4 text-gray-400 text-xs">{c.email || <span className="text-gray-600">—</span>}</td>
+                      <td className="py-2 text-xs">
+                        {c.segmento
+                          ? <span className="px-2 py-0.5 rounded-full bg-accent/10 border border-accent/20 text-accent/80">{c.segmento}</span>
+                          : <span className="text-gray-600">—</span>
+                        }
+                      </td>
                     </tr>
                   ))}
                 </tbody>

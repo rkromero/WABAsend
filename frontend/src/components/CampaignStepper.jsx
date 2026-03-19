@@ -88,26 +88,53 @@ function Step2({ data, onChange }) {
 
 // ── Paso 3: Selección de contactos ────────────────────────────────────────────
 function Step3({ data, onChange }) {
-  const [contacts, setContacts]   = useState([]);
-  const [total, setTotal]         = useState(0);
-  const [loading, setLoading]     = useState(true);
-  const [search, setSearch]       = useState('');
-  const [selectAll, setSelectAll] = useState(data.selectAll ?? true);
+  const [contacts, setContacts]     = useState([]);
+  const [total, setTotal]           = useState(0);
+  const [loading, setLoading]       = useState(true);
+  const [search, setSearch]         = useState('');
+  const [segmento, setSegmento]     = useState('');      // '' = todos
+  const [segments, setSegments]     = useState([]);
+  const [selectAll, setSelectAll]   = useState(data.selectAll ?? true);
 
+  // Cargar segmentos una sola vez al montar
   useEffect(() => {
-    api.get('/contacts', { params: { limit: 200, search } })
+    api.get('/contacts/segments')
+      .then((r) => setSegments(r.data || []))
+      .catch(() => {});
+  }, []);
+
+  // Recargar lista cuando cambian búsqueda o segmento
+  useEffect(() => {
+    setLoading(true);
+    api.get('/contacts', {
+      params: {
+        limit: 500,
+        search:   search   || undefined,
+        segmento: segmento || undefined,
+      },
+    })
       .then((r) => {
         setContacts(r.data.contacts);
         setTotal(r.data.pagination.total);
       })
       .catch((err) => toast.error(err.message))
       .finally(() => setLoading(false));
-  }, [search]);
+  }, [search, segmento]);
 
+  // Al seleccionar un segmento, auto-seleccionar todos sus contactos
+  function handleSegmento(seg) {
+    const next = segmento === seg ? '' : seg;
+    setSegmento(next);
+    // Resetear selección manual; el botón "Todos" se encargará al re-render
+    setSelectAll(false);
+    onChange({ selectAll: false, contact_ids: [] });
+  }
+
+  // Seleccionar / deseleccionar todos los visibles
   function toggleSelectAll(val) {
     setSelectAll(val);
     if (val) {
-      onChange({ selectAll: true, contact_ids: contacts.map((c) => c.id) });
+      onChange({ selectAll: !segmento, contact_ids: contacts.map((c) => c.id) });
     } else {
       onChange({ selectAll: false, contact_ids: [] });
     }
@@ -121,10 +148,23 @@ function Step3({ data, onChange }) {
 
   const selectedIds = data.contact_ids || [];
 
+  const SEGMENT_COLORS = [
+    'text-accent border-accent bg-accent/10',
+    'text-purple-400 border-purple-400 bg-purple-400/10',
+    'text-amber-400 border-amber-400 bg-amber-400/10',
+    'text-emerald-400 border-emerald-400 bg-emerald-400/10',
+    'text-blue-400 border-blue-400 bg-blue-400/10',
+    'text-rose-400 border-rose-400 bg-rose-400/10',
+  ];
+
   return (
     <div className="space-y-3">
+      {/* Header: total + botón seleccionar todos */}
       <div className="flex items-center justify-between">
-        <label className="form-label mb-0">Contactos ({total} total)</label>
+        <label className="form-label mb-0">
+          {segmento ? `Segmento "${segmento}"` : 'Contactos'}{' '}
+          <span className="text-gray-600">({total})</span>
+        </label>
         <button
           onClick={() => toggleSelectAll(!selectAll)}
           className={`text-xs px-3 py-1 rounded-full border transition-all ${
@@ -133,10 +173,47 @@ function Step3({ data, onChange }) {
               : 'border-base-border text-gray-400 hover:border-white/20'
           }`}
         >
-          {selectAll ? `Todos seleccionados (${total})` : `${selectedIds.length} seleccionados`}
+          {selectAll
+            ? `Todos seleccionados (${total})`
+            : selectedIds.length > 0
+            ? `${selectedIds.length} seleccionados`
+            : 'Seleccionar todos'}
         </button>
       </div>
 
+      {/* Filtros de segmento */}
+      {segments.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            onClick={() => handleSegmento('')}
+            className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
+              segmento === ''
+                ? 'bg-white/10 border-white/20 text-white'
+                : 'border-base-border text-gray-500 hover:border-white/20 hover:text-gray-300'
+            }`}
+          >
+            Todos
+          </button>
+          {segments.map((s, idx) => {
+            const color = SEGMENT_COLORS[idx % SEGMENT_COLORS.length];
+            return (
+              <button
+                key={s.segmento}
+                onClick={() => handleSegmento(s.segmento)}
+                className={`text-xs px-2.5 py-1 rounded-full border transition-all ${
+                  segmento === s.segmento
+                    ? color
+                    : 'border-base-border text-gray-500 hover:border-white/20 hover:text-gray-300'
+                }`}
+              >
+                {s.segmento} <span className="opacity-60">({s.total})</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Búsqueda */}
       <input
         className="input-field"
         placeholder="Buscar por nombre o teléfono..."
@@ -144,9 +221,12 @@ function Step3({ data, onChange }) {
         onChange={(e) => setSearch(e.target.value)}
       />
 
-      <div className="max-h-60 overflow-y-auto space-y-1 pr-1">
+      {/* Lista de contactos */}
+      <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
         {loading ? (
           Array.from({ length: 5 }).map((_, i) => <div key={i} className="skeleton h-9 rounded-lg" />)
+        ) : contacts.length === 0 ? (
+          <p className="text-xs text-gray-500 text-center py-4">No se encontraron contactos</p>
         ) : (
           contacts.map((c) => {
             const isChecked = selectAll || selectedIds.includes(c.id);
@@ -161,8 +241,13 @@ function Step3({ data, onChange }) {
                   onChange={() => toggleContact(c.id)}
                   className="accent-accent w-3.5 h-3.5"
                 />
-                <span className="text-sm text-gray-200">{c.nombre}</span>
-                <span className="text-xs text-gray-500 font-mono ml-auto">{c.telefono}</span>
+                <span className="text-sm text-gray-200 truncate">{c.nombre}</span>
+                {c.segmento && !segmento && (
+                  <span className="text-[10px] text-gray-500 bg-white/5 px-1.5 py-0.5 rounded-full shrink-0">
+                    {c.segmento}
+                  </span>
+                )}
+                <span className="text-xs text-gray-500 font-mono ml-auto shrink-0">{c.telefono}</span>
               </label>
             );
           })
@@ -198,9 +283,9 @@ function Step4({ data, onChange }) {
 
 // ── Paso 5: Confirmación ──────────────────────────────────────────────────────
 function Step5({ data }) {
-  const contactCount = data.selectAll
-    ? 'Todos los contactos'
-    : `${data.contact_ids?.length || 0} contactos seleccionados`;
+  const contactCount = (data.contact_ids?.length || 0) > 0
+    ? `${data.contact_ids.length} contactos seleccionados`
+    : 'Todos los contactos';
 
   const scheduledDate = data.scheduled_at
     ? new Date(data.scheduled_at).toLocaleString('es-AR')
@@ -258,8 +343,9 @@ export default function CampaignStepper({ onSuccess, onCancel }) {
     setSaving(true);
     try {
       // Obtener IDs finales de contactos
+      // selectAll=true && contact_ids vacío → buscar todos los contactos de la BD
       let contact_ids = data.contact_ids;
-      if (data.selectAll) {
+      if (data.selectAll && contact_ids.length === 0) {
         const r = await api.get('/contacts', { params: { limit: 10000 } });
         contact_ids = r.data.contacts.map((c) => c.id);
       }

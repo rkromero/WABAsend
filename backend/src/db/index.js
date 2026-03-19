@@ -160,8 +160,9 @@ export async function initSchema() {
 
   // 2. Migraciones: agregar columnas nuevas a tablas existentes
   const migrations = [
-    `ALTER TABLE waba_contacts     ADD COLUMN IF NOT EXISTS email VARCHAR(255)`,
-    `ALTER TABLE waba_message_logs ADD COLUMN IF NOT EXISTS email VARCHAR(255)`,
+    `ALTER TABLE waba_contacts     ADD COLUMN IF NOT EXISTS email    VARCHAR(255)`,
+    `ALTER TABLE waba_contacts     ADD COLUMN IF NOT EXISTS segmento VARCHAR(100)`,
+    `ALTER TABLE waba_message_logs ADD COLUMN IF NOT EXISTS email    VARCHAR(255)`,
   ];
   for (const m of migrations) {
     try { await pool.query(m); } catch (err) {
