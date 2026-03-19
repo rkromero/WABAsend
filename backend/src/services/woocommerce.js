@@ -235,7 +235,8 @@ export async function syncProducts(forceFullSync = false) {
 
     const isNew          = existing.rows.length === 0;
     const imageChanged   = !isNew && existing.rows[0].imagen_url !== imagenUrl;
-    const needsVision    = (isNew || imageChanged) && imagenUrl;
+    // Vision solo si el producto tiene stock — no procesamos imágenes de productos agotados
+    const needsVision    = (isNew || imageChanged) && imagenUrl && activo;
 
     // Llamar a Vision solo si es necesario
     let descripcionVision = existing.rows[0]?.descripcion_vision || null;
