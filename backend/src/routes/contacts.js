@@ -105,12 +105,21 @@ router.post('/bulk', async (req, res) => {
       }
 
       try {
-        await query(
-          `INSERT INTO contacts (nombre, telefono)
-           VALUES ($1, $2)
-           ON CONFLICT (telefono) DO UPDATE SET nombre = EXCLUDED.nombre`,
-          [nombre, telefono]
+        // Verificar si ya existe, actualizar o insertar
+        const existing = await query(
+          `SELECT id FROM contacts WHERE telefono = $1`, [telefono]
         );
+        if (existing.rows.length > 0) {
+          await query(
+            `UPDATE contacts SET nombre = $1 WHERE telefono = $2`,
+            [nombre, telefono]
+          );
+        } else {
+          await query(
+            `INSERT INTO contacts (nombre, telefono) VALUES ($1, $2)`,
+            [nombre, telefono]
+          );
+        }
         imported++;
       } catch (rowErr) {
         errors.push({ nombre, telefono, error: rowErr.message });
