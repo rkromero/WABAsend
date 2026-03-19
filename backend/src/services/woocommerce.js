@@ -357,7 +357,10 @@ export async function syncProducts(forceFullSync = false) {
     // 2. Tiene stock (o es variable con stock_status instock)
     // 3. Su visibilidad en el catálogo NO es 'hidden'
     //    (hidden = oculto del catálogo y búsqueda, equivale a no disponible para el bot)
-    const catalogVisible = woo.catalog_visibility !== 'hidden';
+    // Solo incluir productos visibles en tienda ('visible' o 'catalog')
+    // 'search' = solo en búsquedas internas del sitio → no aplica al bot
+    // 'hidden' = oculto de todo → definitivamente fuera
+    const catalogVisible = ['visible', 'catalog'].includes(woo.catalog_visibility);
     const activo = woo.status === 'publish'
       && (woo.stock_status === 'instock' || stock > 0)
       && catalogVisible;
