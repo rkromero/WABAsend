@@ -12,7 +12,7 @@
 import axios from 'axios';
 import { query } from '../db/index.js';
 
-const META_API_VERSION = 'v18.0';
+const META_API_VERSION = 'v21.0';
 const META_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
 
 /**
