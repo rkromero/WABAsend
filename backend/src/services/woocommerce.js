@@ -117,6 +117,29 @@ async function fetchProducts(modifiedAfter = null) {
 }
 
 /**
+ * Elimina etiquetas HTML y normaliza espacios.
+ * Convierte tablas y listas en texto legible para que la IA pueda leerlo.
+ *
+ * @param {string} html
+ * @returns {string}
+ */
+function stripHtml(html) {
+  if (!html) return '';
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')          // saltos de línea
+    .replace(/<\/?(tr|li|p|div|h[1-6])[^>]*>/gi, '\n') // bloques → newline
+    .replace(/<td[^>]*>/gi, ' | ')          // celdas de tabla → separador
+    .replace(/<[^>]+>/g, '')                // resto de tags
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, '\n\n')             // máximo 2 newlines seguidos
+    .trim();
+}
+
+/**
  * Para productos variables, obtiene las variantes con stock disponible.
  * WooCommerce guarda el stock por variante (talle/color), no en el producto padre.
  *
@@ -160,18 +183,43 @@ async function fetchVariations(productId) {
 }
 
 /**
- * Usa GPT-4o Vision para analizar la imagen principal del producto y generar
- * una descripción enriquecida en español con colores, materiales y detalles visuales.
- * Solo se llama para productos nuevos o con imagen cambiada.
+ * Usa GPT-4o Vision para analizar la imagen del producto y generar una descripción
+ * enriquecida combinando lo visual con el texto de la descripción del producto.
+ *
+ * Recibe el texto limpio de la descripción (corta + larga) para que el modelo
+ * pueda leer tablas de talles, materiales y detalles que no son visibles en la imagen.
  *
  * @param {string} imageUrl
  * @param {string} nombre
  * @param {string} categoria
+ * @param {string} descripcionTexto - Texto limpio (sin HTML) de descripción corta + larga
  * @returns {Promise<string>}
  */
-async function generateVisionDescription(imageUrl, nombre, categoria) {
+async function generateVisionDescription(imageUrl, nombre, categoria, descripcionTexto) {
+  // Contexto de texto: limitar para no pasarnos del límite de tokens
+  const textoContexto = descripcionTexto
+    ? `\n\nInformación adicional del producto (descripción de la tienda):\n${descripcionTexto.substring(0, 1500)}`
+    : '';
+
+  // Si no hay imagen, generamos descripción solo con el texto disponible
   if (!imageUrl) {
-    return `Producto: ${nombre}. Categoría: ${categoria || 'Sin categoría'}.`;
+    if (!descripcionTexto) {
+      return `Producto: ${nombre}. Categoría: ${categoria || 'Sin categoría'}.`;
+    }
+    // Sin imagen pero con descripción: usar GPT texto para resumir
+    try {
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{
+          role: 'user',
+          content: `Basándote en la siguiente descripción del producto "${nombre}" (categoría: ${categoria || 'sin especificar'}), generá una descripción concisa en español con los detalles más relevantes para un cliente: colores, materiales, talles disponibles, estilo y ocasión de uso. Una sola línea de texto fluido con keywords de búsqueda.${textoContexto}`,
+        }],
+        max_tokens: 200,
+      });
+      return response.choices[0]?.message?.content?.trim() || `Producto: ${nombre}`;
+    } catch {
+      return `Producto: ${nombre}. Categoría: ${categoria || 'Sin categoría'}.`;
+    }
   }
 
   try {
@@ -183,32 +231,33 @@ async function generateVisionDescription(imageUrl, nombre, categoria) {
           content: [
             {
               type: 'text',
-              text: `Analizá esta imagen de producto de indumentaria/moda de la tienda online "${nombre}" (categoría: ${categoria || 'sin especificar'}).
+              text: `Analizá esta imagen del producto "${nombre}" (categoría: ${categoria || 'sin especificar'}).
 
-Generá una descripción detallada en español con las siguientes características visibles:
+Combiná lo que ves en la imagen con la información adicional de texto para generar una descripción completa en español que incluya:
 - Tipo exacto de prenda
-- Colores y tonos (sé específico: "azul marino", "verde menta", "blanco hueso")
-- Material o textura visible (jean, lino, algodón, punto, etc.)
-- Estilo (casual, formal, deportivo, elegante, bohemio, etc.)
-- Detalles de diseño (tipo de manga, cuello, escote, estampado, bordado, etc.)
-- Ocasión de uso sugerida
+- Colores y tonos reales (sé específico: "verde tostado", "azul marino", "blanco hueso")
+- Material o textura (jean, lino, seda, algodón, punto, etc.)
+- Estilo (casual, formal, elegante, bohemio, etc.)
+- Detalles de diseño (mangas, cuello, escote, estampado, etc.)
+- Talles o tallas disponibles si aparecen en el texto (IMPORTANTE: incluirlos)
+- Ocasión de uso${textoContexto}
 
-Escribí la descripción en una sola línea de texto fluido, con keywords que un cliente usaría para buscar este producto. No uses viñetas ni saltos de línea.`,
+Escribí todo en una sola línea de texto fluido con keywords de búsqueda. Sin viñetas ni saltos de línea.`,
             },
             {
               type: 'image_url',
-              image_url: { url: imageUrl, detail: 'low' }, // 'low' minimiza el costo
+              image_url: { url: imageUrl, detail: 'low' },
             },
           ],
         },
       ],
-      max_tokens: 200,
+      max_tokens: 250,
     });
 
     return response.choices[0]?.message?.content?.trim() || `Producto: ${nombre}`;
   } catch (err) {
     console.warn(`[WooCommerce] Vision falló para "${nombre}": ${err.message}`);
-    return `Producto: ${nombre}. Categoría: ${categoria || 'Sin categoría'}.`;
+    return `Producto: ${nombre}.${textoContexto ? ' ' + descripcionTexto.substring(0, 200) : ''}`;
   }
 }
 
@@ -267,6 +316,12 @@ export async function syncProducts(forceFullSync = false) {
     const imagenUrl    = woo.images?.[0]?.src || null;
     const permalink    = woo.permalink || null;
 
+    // Limpiar HTML de ambas descripciones y combinarlas para dar contexto a Vision.
+    // La descripción larga suele tener tablas de talles, materiales, guía de cuidado, etc.
+    const descCorta = stripHtml(woo.short_description);
+    const descLarga = stripHtml(woo.description);
+    const descripcionTexto = [descCorta, descLarga].filter(Boolean).join('\n\n');
+
     // --- Manejo de stock según tipo de producto ---
     // Productos "variable" (con talles/colores) guardan el stock en cada variante,
     // no en el producto padre. stock_quantity del padre suele ser null o 0.
@@ -301,7 +356,7 @@ export async function syncProducts(forceFullSync = false) {
     let descripcionVision = existing.rows[0]?.descripcion_vision || null;
     if (needsVision) {
       console.log(`[WooCommerce] Vision → "${nombre}"`);
-      descripcionVision = await generateVisionDescription(imagenUrl, nombre, categorias);
+      descripcionVision = await generateVisionDescription(imagenUrl, nombre, categorias, descripcionTexto);
       visionCalls++;
       // Delay mínimo entre llamadas a Vision para respetar rate limits de OpenAI
       await new Promise((r) => setTimeout(r, 300));
@@ -315,7 +370,7 @@ export async function syncProducts(forceFullSync = false) {
             activo, vision_generado_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
         [
-          woo.id, nombre, woo.description || '', descripcionVision,
+          woo.id, nombre, descripcionTexto, descripcionVision,
           precio, precioOferta, stock, variantes || null, categorias, imagenUrl, permalink,
           activo, descripcionVision ? new Date() : null,
         ]
@@ -339,7 +394,7 @@ export async function syncProducts(forceFullSync = false) {
              updated_at           = NOW()
          WHERE woo_id = $12`,
         [
-          nombre, woo.description || '', descripcionVision,
+          nombre, descripcionTexto, descripcionVision,
           precio, precioOferta, stock, variantes || null, categorias, imagenUrl, permalink,
           activo, woo.id,
         ]
