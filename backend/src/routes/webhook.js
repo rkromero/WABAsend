@@ -17,6 +17,8 @@ import {
   getOrCreateConversation,
   sendMessageToConversation,
 } from '../services/chatwoot.js';
+import { shouldBotRespond, generateBotResponse } from '../services/bot.js';
+import { sendFreeTextMessage } from '../services/whatsapp.js';
 
 const router = Router();
 
@@ -130,6 +132,48 @@ async function processIncomingMessage({ telefono, nombre, messageText, waMessage
     console.log(`[Webhook] Mensaje entrante guardado — de: ${telefono}`);
   } catch (err) {
     console.error('[Webhook] Error guardando mensaje entrante en DB:', err.message);
+  }
+
+  // --- Bot de IA: responder automáticamente si está habilitado ---
+  // Nota: solo respondemos a mensajes reales de usuarios, nunca en loop.
+  // El flag `bot_reply` en incoming_messages evita que una respuesta del bot
+  // vuelva a disparar el bot (las respuestas del bot no se envían al webhook).
+  try {
+    const botActive = await shouldBotRespond();
+    if (botActive) {
+      // Obtener historial reciente del mismo número para dar contexto al modelo
+      const historyResult = await query(
+        `SELECT message FROM incoming_messages
+         WHERE telefono = $1
+         ORDER BY created_at DESC
+         LIMIT 10`,
+        [telefono]
+      );
+
+      // Revertir para que estén en orden cronológico (más viejo primero)
+      const conversationHistory = historyResult.rows
+        .reverse()
+        .map((r) => ({ role: 'user', content: r.message }));
+
+      const botResponse = await generateBotResponse(messageText, conversationHistory);
+
+      // Enviar respuesta por WhatsApp (solo funciona en ventana de 24h)
+      const botMessageId = await sendFreeTextMessage(telefono, botResponse);
+      console.log(`[Bot] Mensaje enviado a ${telefono} — WA ID: ${botMessageId}`);
+
+      // Registrar la respuesta del bot en Chatwoot como mensaje saliente
+      if (chatwootConversationId) {
+        try {
+          await sendMessageToConversation(chatwootConversationId, botResponse, 'outgoing');
+        } catch (chatwootErr) {
+          // No bloqueamos si Chatwoot falla; la respuesta ya fue enviada por WhatsApp
+          console.warn('[Bot] No se pudo registrar respuesta en Chatwoot:', chatwootErr.message);
+        }
+      }
+    }
+  } catch (botErr) {
+    // El bot falla silenciosamente — nunca debe cortar el flujo principal del webhook
+    console.error('[Bot] Error al generar o enviar respuesta:', botErr.message);
   }
 }
 

@@ -137,6 +137,42 @@ export async function sendTemplateMessage(telefono, templateName, templateLangua
 }
 
 /**
+ * Envía un mensaje de texto libre (sesión abierta) a un número de teléfono.
+ * Solo funciona dentro de la ventana de 24 horas desde el último mensaje del usuario.
+ *
+ * @param {string} telefono - Número en formato internacional (ej: 5491112345678)
+ * @param {string} text     - Texto a enviar
+ *
+ * @returns {Promise<string>} ID del mensaje asignado por Meta
+ */
+export async function sendFreeTextMessage(telefono, text) {
+  const { token, phoneNumberId } = await getConfig();
+
+  const response = await axios.post(
+    `${META_BASE_URL}/${phoneNumberId}/messages`,
+    {
+      messaging_product: 'whatsapp',
+      to: telefono,
+      type: 'text',
+      text: { body: text },
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+
+  const messageId = response.data?.messages?.[0]?.id;
+  if (!messageId) {
+    throw new Error('Meta no devolvió un message ID para el mensaje de texto libre');
+  }
+
+  return messageId;
+}
+
+/**
  * Pausa la ejecución por N milisegundos.
  * Usado para rate limiting entre mensajes.
  *
