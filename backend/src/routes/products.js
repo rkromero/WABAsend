@@ -139,6 +139,8 @@ router.get('/woo-debug', async (req, res) => {
       image_src: p.image?.src ?? null,         // campo singular (variantes)
       stock_status: p.stock_status,
       stock_quantity: p.stock_quantity,
+      catalog_visibility: p.catalog_visibility, // 'visible'|'catalog'|'search'|'hidden'
+      status: p.status,
     } : null;
 
     res.json({

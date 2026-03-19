@@ -352,8 +352,15 @@ export async function syncProducts(forceFullSync = false) {
       stock = woo.stock_quantity ?? (woo.stock_status === 'instock' ? 1 : 0);
     }
 
-    // En delta pueden venir productos sin stock (recién agotados) → los marcamos inactivos
-    const activo = woo.status === 'publish' && (woo.stock_status === 'instock' || stock > 0);
+    // Un producto está activo si:
+    // 1. Está publicado
+    // 2. Tiene stock (o es variable con stock_status instock)
+    // 3. Su visibilidad en el catálogo NO es 'hidden'
+    //    (hidden = oculto del catálogo y búsqueda, equivale a no disponible para el bot)
+    const catalogVisible = woo.catalog_visibility !== 'hidden';
+    const activo = woo.status === 'publish'
+      && (woo.stock_status === 'instock' || stock > 0)
+      && catalogVisible;
 
     // Ver si el producto ya existe en nuestra DB
     const existing = await query(
