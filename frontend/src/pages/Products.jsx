@@ -227,9 +227,9 @@ export default function Products() {
                       Vision
                     </div>
                   )}
-                  {/* Badge stock */}
-                  <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm text-white text-[10px] px-1.5 py-0.5 rounded">
-                    Stock: {p.stock}
+                  {/* Badge stock / talles */}
+                  <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm text-white text-[10px] px-1.5 py-0.5 rounded max-w-[90%] truncate">
+                    {p.variantes ? `Talles: ${p.variantes}` : `Stock: ${p.stock}`}
                   </div>
                 </div>
 
@@ -298,7 +298,10 @@ export default function Products() {
                 <p className="text-gray-500 text-xs">{selectedProduct.categorias || 'Sin categoría'}</p>
                 <div className="text-sm">{formatPrice(selectedProduct.precio, selectedProduct.precio_oferta)}</div>
                 <div className="flex items-center gap-3 text-xs text-gray-400">
-                  <span>Stock: <span className="text-white font-medium">{selectedProduct.stock}</span></span>
+                  {selectedProduct.variantes
+                    ? <span>Talles: <span className="text-white font-medium">{selectedProduct.variantes}</span></span>
+                    : <span>Stock: <span className="text-white font-medium">{selectedProduct.stock}</span></span>
+                  }
                   {selectedProduct.permalink && (
                     <a
                       href={selectedProduct.permalink}

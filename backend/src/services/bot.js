@@ -122,10 +122,13 @@ function formatProductsForPrompt(products) {
     const precio = p.precio_oferta
       ? `$${p.precio_oferta} (antes $${p.precio})`
       : `$${p.precio}`;
-    const stock = p.stock > 0 ? `Stock disponible: ${p.stock}` : 'Último disponible';
+    // Para productos con talles/colores, mostrar los disponibles en lugar del número de stock
+    const disponibilidad = p.variantes
+      ? `Talles disponibles: ${p.variantes}`
+      : `Stock: ${p.stock}`;
     const desc = p.descripcion_vision || p.nombre;
     const link = p.permalink ? ` | Link: ${p.permalink}` : '';
-    return `• ${p.nombre} — ${desc} | Precio: ${precio} | ${stock}${link}`;
+    return `• ${p.nombre} — ${desc} | Precio: ${precio} | ${disponibilidad}${link}`;
   });
 
   return `\n\nPRODUCTOS DISPONIBLES EN STOCK:\n${lines.join('\n')}`;

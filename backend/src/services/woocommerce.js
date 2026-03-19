@@ -117,6 +117,49 @@ async function fetchProducts(modifiedAfter = null) {
 }
 
 /**
+ * Para productos variables, obtiene las variantes con stock disponible.
+ * WooCommerce guarda el stock por variante (talle/color), no en el producto padre.
+ *
+ * Devuelve:
+ *  - stockTotal : suma de stock de todas las variantes disponibles
+ *  - variantes  : string con los valores disponibles, ej: "L, M, XL"
+ *
+ * @param {number} productId - ID del producto padre en WooCommerce
+ * @returns {Promise<{stockTotal: number, variantes: string}>}
+ */
+async function fetchVariations(productId) {
+  try {
+    const client = getWooClient();
+    const response = await client.get(`/products/${productId}/variations`, {
+      params: { per_page: 100, stock_status: 'instock' },
+    });
+
+    const variations = response.data || [];
+    if (variations.length === 0) return { stockTotal: 0, variantes: '' };
+
+    // Sumar stock de todas las variantes disponibles
+    const stockTotal = variations.reduce((sum, v) => {
+      return sum + (v.stock_quantity ?? (v.stock_status === 'instock' ? 1 : 0));
+    }, 0);
+
+    // Extraer los valores de atributos (talles, colores) de las variantes con stock
+    // Cada variante tiene attributes: [{ name: 'Talle', option: 'L' }, ...]
+    const valores = variations
+      .filter((v) => v.stock_status === 'instock' || (v.stock_quantity ?? 0) > 0)
+      .flatMap((v) => (v.attributes || []).map((a) => a.option))
+      .filter(Boolean);
+
+    // Eliminar duplicados y ordenar
+    const unicos = [...new Set(valores)].join(', ');
+
+    return { stockTotal, variantes: unicos };
+  } catch (err) {
+    console.warn(`[WooCommerce] No se pudieron obtener variantes del producto ${productId}: ${err.message}`);
+    return { stockTotal: 1, variantes: '' }; // fallback: asumir que tiene stock
+  }
+}
+
+/**
  * Usa GPT-4o Vision para analizar la imagen principal del producto y generar
  * una descripción enriquecida en español con colores, materiales y detalles visuales.
  * Solo se llama para productos nuevos o con imagen cambiada.
@@ -220,12 +263,28 @@ export async function syncProducts(forceFullSync = false) {
     const nombre       = woo.name || 'Sin nombre';
     const precio       = parseFloat(woo.price) || 0;
     const precioOferta = woo.sale_price ? parseFloat(woo.sale_price) : null;
-    const stock        = woo.stock_quantity ?? (woo.in_stock ? 1 : 0);
     const categorias   = (woo.categories || []).map((c) => c.name).join(', ');
     const imagenUrl    = woo.images?.[0]?.src || null;
     const permalink    = woo.permalink || null;
+
+    // --- Manejo de stock según tipo de producto ---
+    // Productos "variable" (con talles/colores) guardan el stock en cada variante,
+    // no en el producto padre. stock_quantity del padre suele ser null o 0.
+    // Hay que consultar las variantes para obtener el stock real y los talles disponibles.
+    let stock    = 0;
+    let variantes = '';
+
+    if (woo.type === 'variable') {
+      const varData = await fetchVariations(woo.id);
+      stock    = varData.stockTotal;
+      variantes = varData.variantes;
+    } else {
+      // Producto simple: el stock está directamente en el padre
+      stock = woo.stock_quantity ?? (woo.stock_status === 'instock' ? 1 : 0);
+    }
+
     // En delta pueden venir productos sin stock (recién agotados) → los marcamos inactivos
-    const activo       = woo.status === 'publish' && (woo.stock_status === 'instock' || stock > 0);
+    const activo = woo.status === 'publish' && (woo.stock_status === 'instock' || stock > 0);
 
     // Ver si el producto ya existe en nuestra DB
     const existing = await query(
@@ -252,12 +311,12 @@ export async function syncProducts(forceFullSync = false) {
       await query(
         `INSERT INTO waba_products
            (woo_id, nombre, descripcion_original, descripcion_vision,
-            precio, precio_oferta, stock, categorias, imagen_url, permalink,
+            precio, precio_oferta, stock, variantes, categorias, imagen_url, permalink,
             activo, vision_generado_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
         [
           woo.id, nombre, woo.description || '', descripcionVision,
-          precio, precioOferta, stock, categorias, imagenUrl, permalink,
+          precio, precioOferta, stock, variantes || null, categorias, imagenUrl, permalink,
           activo, descripcionVision ? new Date() : null,
         ]
       );
@@ -265,22 +324,23 @@ export async function syncProducts(forceFullSync = false) {
     } else {
       await query(
         `UPDATE waba_products
-         SET nombre             = $1,
+         SET nombre               = $1,
              descripcion_original = $2,
-             descripcion_vision = COALESCE($3, descripcion_vision),
-             precio             = $4,
-             precio_oferta      = $5,
-             stock              = $6,
-             categorias         = $7,
-             imagen_url         = $8,
-             permalink          = $9,
-             activo             = $10,
-             vision_generado_at = CASE WHEN $3 IS NOT NULL THEN NOW() ELSE vision_generado_at END,
-             updated_at         = NOW()
-         WHERE woo_id = $11`,
+             descripcion_vision   = COALESCE($3, descripcion_vision),
+             precio               = $4,
+             precio_oferta        = $5,
+             stock                = $6,
+             variantes            = $7,
+             categorias           = $8,
+             imagen_url           = $9,
+             permalink            = $10,
+             activo               = $11,
+             vision_generado_at   = CASE WHEN $3 IS NOT NULL THEN NOW() ELSE vision_generado_at END,
+             updated_at           = NOW()
+         WHERE woo_id = $12`,
         [
           nombre, woo.description || '', descripcionVision,
-          precio, precioOferta, stock, categorias, imagenUrl, permalink,
+          precio, precioOferta, stock, variantes || null, categorias, imagenUrl, permalink,
           activo, woo.id,
         ]
       );
@@ -330,15 +390,16 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
     }
 
     const conditions = words.map((_, i) => `
-      (nombre            ILIKE $${i + 2}
+      (nombre             ILIKE $${i + 2}
     OR descripcion_vision ILIKE $${i + 2}
-    OR categorias        ILIKE $${i + 2})
+    OR categorias         ILIKE $${i + 2}
+    OR variantes          ILIKE $${i + 2})
     `).join(' OR ');
 
     const params = [limit, ...words.map((w) => `%${w}%`)];
 
     const result = await query(
-      `SELECT nombre, descripcion_vision, precio, precio_oferta, stock, categorias, permalink, imagen_url
+      `SELECT nombre, descripcion_vision, precio, precio_oferta, stock, variantes, categorias, permalink, imagen_url
        FROM waba_products
        WHERE activo = true AND stock > 0 AND (${conditions})
        ORDER BY (nombre ILIKE $2) DESC, updated_at DESC

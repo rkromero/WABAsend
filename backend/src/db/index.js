@@ -141,7 +141,16 @@ export async function initSchema() {
     );
   `);
 
-  // 2. Índices de performance
+  // 2. Migración: agregar columna variantes para productos con talles/colores
+  try {
+    await pool.query(
+      `ALTER TABLE waba_products ADD COLUMN IF NOT EXISTS variantes TEXT`
+    );
+  } catch (err) {
+    console.warn('[DB] variantes migration warning:', err.message.split('\n')[0]);
+  }
+
+  // 3. Índices de performance
   try {
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_waba_message_logs_campaign_id
