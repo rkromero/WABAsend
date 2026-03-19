@@ -29,7 +29,7 @@ const chatwootClient = axios.create({
     'api_access_token': CHATWOOT_TOKEN,
     'Content-Type': 'application/json',
   },
-  timeout: 10000,
+  timeout: 30000,
 });
 
 /**
