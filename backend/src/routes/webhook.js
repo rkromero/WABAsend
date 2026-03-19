@@ -139,7 +139,7 @@ async function processIncomingMessage({ telefono, nombre, messageText, waMessage
   // El flag `bot_reply` en incoming_messages evita que una respuesta del bot
   // vuelva a disparar el bot (las respuestas del bot no se envían al webhook).
   try {
-    const botActive = await shouldBotRespond();
+    const botActive = await shouldBotRespond(telefono);
     if (botActive) {
       // Obtener historial reciente del mismo número para dar contexto al modelo
       const historyResult = await query(

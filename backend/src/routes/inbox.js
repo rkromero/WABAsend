@@ -11,6 +11,7 @@
 import { Router } from 'express';
 import { getConversations, getMessages, sendMessageToConversation, getConversation } from '../services/chatwoot.js';
 import { getConfig } from '../services/whatsapp.js';
+import { query } from '../db/index.js';
 import axios from 'axios';
 
 const router = Router();
@@ -122,6 +123,89 @@ router.post('/conversations/:id/messages', async (req, res) => {
     });
   } catch (err) {
     console.error('[Inbox] POST message error:', err.response?.data || err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * Obtiene el teléfono del contacto de una conversación.
+ * Helper reutilizado por takeover y release.
+ */
+async function getTelefonoFromConversation(conversationId) {
+  const conversation = await getConversation(conversationId);
+  const telefono = conversation.meta?.sender?.phone_number?.replace(/^\+/, '');
+  if (!telefono) throw new Error('No se pudo obtener el teléfono del contacto');
+  return telefono;
+}
+
+// GET /api/inbox/conversations/:id/bot-status — estado del bot para esta conversación
+router.get('/conversations/:id/bot-status', async (req, res) => {
+  const conversationId = parseInt(req.params.id);
+  if (isNaN(conversationId)) {
+    return res.status(400).json({ success: false, error: 'ID inválido' });
+  }
+
+  try {
+    const telefono = await getTelefonoFromConversation(conversationId);
+    const result = await query(
+      'SELECT bot_paused FROM waba_conversation_overrides WHERE telefono = $1',
+      [telefono]
+    );
+    const botPaused = result.rows[0]?.bot_paused ?? false;
+    res.json({ success: true, data: { bot_paused: botPaused, telefono } });
+  } catch (err) {
+    console.error('[Inbox] bot-status error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/inbox/conversations/:id/takeover — agente toma el control, bot se silencia
+router.post('/conversations/:id/takeover', async (req, res) => {
+  const conversationId = parseInt(req.params.id);
+  if (isNaN(conversationId)) {
+    return res.status(400).json({ success: false, error: 'ID inválido' });
+  }
+
+  try {
+    const telefono = await getTelefonoFromConversation(conversationId);
+
+    // UPSERT: si ya existe el registro lo actualiza, si no lo crea
+    await query(
+      `INSERT INTO waba_conversation_overrides (telefono, bot_paused, paused_at)
+       VALUES ($1, true, NOW())
+       ON CONFLICT (telefono) DO UPDATE SET bot_paused = true, paused_at = NOW()`,
+      [telefono]
+    );
+
+    console.log(`[Inbox] Agente tomó conversación con ${telefono} — bot pausado`);
+    res.json({ success: true, data: { bot_paused: true, telefono } });
+  } catch (err) {
+    console.error('[Inbox] takeover error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/inbox/conversations/:id/release — agente devuelve la conversación al bot
+router.post('/conversations/:id/release', async (req, res) => {
+  const conversationId = parseInt(req.params.id);
+  if (isNaN(conversationId)) {
+    return res.status(400).json({ success: false, error: 'ID inválido' });
+  }
+
+  try {
+    const telefono = await getTelefonoFromConversation(conversationId);
+
+    await query(
+      `INSERT INTO waba_conversation_overrides (telefono, bot_paused, paused_at)
+       VALUES ($1, false, NULL)
+       ON CONFLICT (telefono) DO UPDATE SET bot_paused = false, paused_at = NULL`,
+      [telefono]
+    );
+
+    console.log(`[Inbox] Conversación con ${telefono} devuelta al bot`);
+    res.json({ success: true, data: { bot_paused: false, telefono } });
+  } catch (err) {
+    console.error('[Inbox] release error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });

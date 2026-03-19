@@ -87,17 +87,32 @@ export function isWithinSchedule(start, end) {
  * Condiciones:
  *   1. BOT_ENABLED debe ser true
  *   2. Si BOT_SCHEDULE_ENABLED es true, la hora actual debe estar dentro del horario
+ *   3. La conversación con este teléfono no debe estar tomada por un agente humano
  *
+ * @param {string} telefono - Número del remitente (para verificar takeover)
  * @returns {Promise<boolean>}
  */
-export async function shouldBotRespond() {
+export async function shouldBotRespond(telefono) {
   try {
     const config = await getBotConfig();
 
     if (!config.enabled) return false;
 
     if (config.scheduleEnabled) {
-      return isWithinSchedule(config.scheduleStart, config.scheduleEnd);
+      if (!isWithinSchedule(config.scheduleStart, config.scheduleEnd)) return false;
+    }
+
+    // Verificar si un agente tomó el control de esta conversación.
+    // Si bot_paused = true, el bot se silencia para este número específico.
+    if (telefono) {
+      const override = await query(
+        'SELECT bot_paused FROM waba_conversation_overrides WHERE telefono = $1',
+        [telefono]
+      );
+      if (override.rows[0]?.bot_paused === true) {
+        console.log(`[Bot] Conversación con ${telefono} tomada por agente — bot silenciado`);
+        return false;
+      }
     }
 
     return true;

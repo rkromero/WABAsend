@@ -130,6 +130,12 @@ export async function initSchema() {
       updated_at            TIMESTAMP DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS waba_conversation_overrides (
+      telefono    VARCHAR(20)  PRIMARY KEY,
+      bot_paused  BOOLEAN      NOT NULL DEFAULT false,
+      paused_at   TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS incoming_messages (
       id                        SERIAL PRIMARY KEY,
       telefono                  VARCHAR(20) NOT NULL,

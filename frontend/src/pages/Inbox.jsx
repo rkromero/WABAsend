@@ -15,6 +15,8 @@ import {
   Inbox as InboxIcon,
   Phone,
   RefreshCw,
+  Bot,
+  UserCheck,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format, formatDistanceToNow, parseISO } from 'date-fns';
@@ -162,6 +164,8 @@ export default function Inbox() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending]                 = useState(false);
   const [replyText, setReplyText]             = useState('');
+  const [botPaused, setBotPaused]             = useState(false);
+  const [togglingBot, setTogglingBot]         = useState(false);
 
   const messagesEndRef = useRef(null);
   const inputRef       = useRef(null);
@@ -216,6 +220,7 @@ export default function Inbox() {
       setLoadingMessages(true);
       setMessages([]);
       fetchMessages();
+      fetchBotStatus();
     }
   }, [activeConvId]); // eslint-disable-line
 
@@ -223,6 +228,34 @@ export default function Inbox() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // ── Estado del bot para la conversación activa ────────────────────────────
+
+  const fetchBotStatus = useCallback(async () => {
+    if (!activeConvId) return;
+    try {
+      const res = await api.get(`/inbox/conversations/${activeConvId}/bot-status`);
+      setBotPaused(res.data?.bot_paused ?? false);
+    } catch {
+      // Si falla, asumimos bot activo (no silenciamos por defecto)
+      setBotPaused(false);
+    }
+  }, [activeConvId]);
+
+  async function handleToggleBot() {
+    if (!activeConvId || togglingBot) return;
+    setTogglingBot(true);
+    try {
+      const endpoint = botPaused ? 'release' : 'takeover';
+      await api.post(`/inbox/conversations/${activeConvId}/${endpoint}`);
+      setBotPaused(!botPaused);
+      toast.success(botPaused ? 'Bot reactivado para esta conversación' : 'Tomaste el control — bot pausado');
+    } catch (err) {
+      toast.error('No se pudo cambiar el modo');
+    } finally {
+      setTogglingBot(false);
+    }
+  }
 
   // ── Enviar respuesta ──────────────────────────────────────────────────────
 
@@ -342,6 +375,24 @@ export default function Inbox() {
                   </p>
                 )}
               </div>
+
+              {/* Botón takeover / release */}
+              <button
+                onClick={handleToggleBot}
+                disabled={togglingBot}
+                title={botPaused ? 'Devolver al bot' : 'Tomar conversación (pausar bot)'}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shrink-0 disabled:opacity-50 ${
+                  botPaused
+                    ? 'bg-accent/10 border border-accent/30 text-accent hover:bg-accent/20'
+                    : 'bg-orange-500/10 border border-orange-500/30 text-orange-400 hover:bg-orange-500/20'
+                }`}
+              >
+                {botPaused ? (
+                  <><Bot size={13} /> Devolver al bot</>
+                ) : (
+                  <><UserCheck size={13} /> Tomar conversación</>
+                )}
+              </button>
             </div>
 
             {/* Área de mensajes */}
