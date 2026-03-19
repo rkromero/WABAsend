@@ -19,27 +19,34 @@ router.get('/', async (req, res) => {
   const offset = (page - 1) * limit;
 
   try {
-    let whereClause = 'WHERE activo = true';
-    const params = [limit, offset];
+    // Construimos dos where clauses separados:
+    // - dataWhere: para la query principal ($1=limit, $2=offset, $3=search)
+    // - countWhere: para el conteo ($1=search) — no lleva limit/offset
+    let dataWhere  = 'WHERE activo = true';
+    let countWhere = 'WHERE activo = true';
+    const dataParams  = [limit, offset];
+    const countParams = [];
 
     if (search) {
-      whereClause += ` AND (nombre ILIKE $3 OR descripcion_vision ILIKE $3 OR categorias ILIKE $3)`;
-      params.push(`%${search}%`);
+      dataWhere  += ` AND (nombre ILIKE $3 OR descripcion_vision ILIKE $3 OR categorias ILIKE $3)`;
+      countWhere += ` AND (nombre ILIKE $1 OR descripcion_vision ILIKE $1 OR categorias ILIKE $1)`;
+      dataParams.push(`%${search}%`);
+      countParams.push(`%${search}%`);
     }
 
     const [dataResult, countResult] = await Promise.all([
       query(
         `SELECT id, woo_id, nombre, descripcion_vision, precio, precio_oferta,
-                stock, categorias, imagen_url, permalink, vision_generado_at, updated_at
+                stock, variantes, categorias, imagen_url, permalink, vision_generado_at, updated_at
          FROM waba_products
-         ${whereClause}
+         ${dataWhere}
          ORDER BY updated_at DESC
          LIMIT $1 OFFSET $2`,
-        params
+        dataParams
       ),
       query(
-        `SELECT COUNT(*) as total FROM waba_products ${whereClause}`,
-        search ? [`%${search}%`] : []
+        `SELECT COUNT(*) as total FROM waba_products ${countWhere}`,
+        countParams
       ),
     ]);
 
