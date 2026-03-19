@@ -9,6 +9,7 @@ import CampaignDetail from './pages/CampaignDetail.jsx';
 import Settings from './pages/Settings.jsx';
 import Inbox from './pages/Inbox.jsx';
 import Bot from './pages/Bot.jsx';
+import Products from './pages/Products.jsx';
 
 export default function App() {
   const location = useLocation();
@@ -33,6 +34,7 @@ export default function App() {
               <Route path="/campaigns/:id" element={<CampaignDetail />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/bot" element={<Bot />} />
+              <Route path="/products" element={<Products />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </div>

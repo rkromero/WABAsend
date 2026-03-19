@@ -9,6 +9,7 @@ import {
   MessageSquareMore,
   MessageSquare,
   Bot,
+  ShoppingBag,
 } from 'lucide-react';
 
 const navItems = [
@@ -16,6 +17,7 @@ const navItems = [
   { to: '/campaigns', icon: Send, label: 'Campañas' },
   { to: '/inbox', icon: MessageSquare, label: 'Bandeja' },
   { to: '/bot', icon: Bot, label: 'Bot' },
+  { to: '/products', icon: ShoppingBag, label: 'Productos' },
   { to: '/contacts', icon: Users, label: 'Contactos' },
   { to: '/templates', icon: FileText, label: 'Plantillas' },
   { to: '/settings', icon: Settings, label: 'Configuración' },
