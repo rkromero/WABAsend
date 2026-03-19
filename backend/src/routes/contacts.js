@@ -2,6 +2,9 @@
  * Rutas de gestión de contactos
  * Autor: Turnio
  * Fecha: 2026-03-18
+ *
+ * NOTA: La tabla se llama `waba_contacts` (no `contacts`) para evitar colisión
+ * con la tabla `contacts` que Chatwoot crea en la misma base de datos.
  */
 
 import { Router } from 'express';
@@ -21,20 +24,20 @@ router.get('/', async (req, res) => {
     let params = [limit, offset];
 
     if (search) {
-      whereClause = "WHERE nombre ILIKE $3 OR telefono ILIKE $3";
+      whereClause = " WHERE nombre ILIKE $3 OR telefono ILIKE $3";
       params.push(`%${search}%`);
     }
 
     const [dataResult, countResult] = await Promise.all([
       query(
         `SELECT id, nombre, telefono, created_at
-         FROM contacts ${whereClause}
+         FROM waba_contacts${whereClause}
          ORDER BY created_at DESC
          LIMIT $1 OFFSET $2`,
         params
       ),
       query(
-        `SELECT COUNT(*) as total FROM contacts ${whereClause}`,
+        `SELECT COUNT(*) as total FROM waba_contacts${whereClause}`,
         search ? [`%${search}%`] : []
       ),
     ]);
@@ -62,7 +65,7 @@ router.get('/', async (req, res) => {
 // GET /api/contacts/count — total de contactos (para el dashboard)
 router.get('/count', async (req, res) => {
   try {
-    const result = await query('SELECT COUNT(*) as total FROM contacts');
+    const result = await query('SELECT COUNT(*) as total FROM waba_contacts');
     res.json({ success: true, data: { total: parseInt(result.rows[0].total) } });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -101,24 +104,30 @@ router.post('/bulk', async (req, res) => {
       }
 
       if (telefono.length < 10 || telefono.length > 15) {
-        errors.push({ nombre, telefono: telefono || '(vacío)', error: `Teléfono inválido: "${telefono}" (${telefono.length} dígitos, se esperan 10-15)` });
+        errors.push({
+          nombre,
+          telefono: telefono || '(vacío)',
+          error: `Teléfono inválido: "${telefono}" (${telefono.length} dígitos, se esperan 10-15)`,
+        });
         skipped++;
         continue;
       }
 
       try {
-        // Verificar si ya existe, actualizar o insertar
+        // Verificar si ya existe para evitar error de unique constraint
         const existing = await query(
-          `SELECT id FROM contacts WHERE telefono = $1`, [telefono]
+          'SELECT id FROM waba_contacts WHERE telefono = $1',
+          [telefono]
         );
+
         if (existing.rows.length > 0) {
           await query(
-            `UPDATE contacts SET nombre = $1 WHERE telefono = $2`,
+            'UPDATE waba_contacts SET nombre = $1 WHERE telefono = $2',
             [nombre, telefono]
           );
         } else {
           await query(
-            `INSERT INTO contacts (nombre, telefono) VALUES ($1, $2)`,
+            'INSERT INTO waba_contacts (nombre, telefono) VALUES ($1, $2)',
             [nombre, telefono]
           );
         }
@@ -147,7 +156,7 @@ router.delete('/:id', async (req, res) => {
   }
 
   try {
-    const result = await query('DELETE FROM contacts WHERE id = $1 RETURNING id', [id]);
+    const result = await query('DELETE FROM waba_contacts WHERE id = $1 RETURNING id', [id]);
     if (result.rowCount === 0) {
       return res.status(404).json({ success: false, error: 'Contacto no encontrado' });
     }
@@ -161,7 +170,7 @@ router.delete('/:id', async (req, res) => {
 // DELETE /api/contacts — eliminar todos los contactos
 router.delete('/', async (req, res) => {
   try {
-    const result = await query('DELETE FROM contacts RETURNING id');
+    const result = await query('DELETE FROM waba_contacts RETURNING id');
     res.json({ success: true, data: { deleted: result.rowCount } });
   } catch (err) {
     console.error('[Contacts] DELETE all error:', err.message);

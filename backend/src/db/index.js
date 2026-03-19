@@ -71,9 +71,10 @@ export async function initSchema() {
       updated_at  TIMESTAMP DEFAULT NOW()
     );
 
-    CREATE TABLE IF NOT EXISTS contacts (
+    CREATE TABLE IF NOT EXISTS waba_contacts (
       id          SERIAL PRIMARY KEY,
-      telefono    VARCHAR(20) NOT NULL UNIQUE,
+      nombre      VARCHAR(255) NOT NULL,
+      telefono    VARCHAR(20)  NOT NULL UNIQUE,
       created_at  TIMESTAMP DEFAULT NOW()
     );
 
@@ -102,10 +103,6 @@ export async function initSchema() {
   // 2. Migración: agregar columnas faltantes si no existen
   // Esto maneja tablas creadas previamente con schema incompleto
   const migrations = [
-    // contacts
-    `ALTER TABLE contacts ADD COLUMN IF NOT EXISTS nombre   VARCHAR(255) NOT NULL DEFAULT 'Sin nombre'`,
-    `ALTER TABLE contacts ADD COLUMN IF NOT EXISTS telefono VARCHAR(20)  UNIQUE`,
-
     // campaigns
     `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS nombre            VARCHAR(255) NOT NULL DEFAULT 'Campaña'`,
     `ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS template_name     VARCHAR(255) NOT NULL DEFAULT ''`,
@@ -147,15 +144,14 @@ export async function initSchema() {
       ON incoming_messages(telefono);
   `);
 
-  // 4. Unique index en contacts.telefono (por separado para manejar el caso
-  //    donde la columna ya existía sin constraint)
+  // 4. Índice único en waba_contacts.telefono
   try {
     await pool.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS contacts_telefono_unique
-        ON contacts(telefono) WHERE telefono IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS waba_contacts_telefono_unique
+        ON waba_contacts(telefono);
     `);
   } catch (err) {
-    console.warn('[DB] contacts_telefono_unique warning:', err.message.split('\n')[0]);
+    console.warn('[DB] waba_contacts_telefono_unique warning:', err.message.split('\n')[0]);
   }
 
   console.log('[DB] Esquema inicializado correctamente');

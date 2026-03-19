@@ -123,7 +123,7 @@ router.post('/', async (req, res) => {
     // Usamos placeholders dinámicos para la cláusula IN
     const placeholders = contact_ids.map((_, i) => `$${i + 1}`).join(',');
     const contactsResult = await query(
-      `SELECT id, nombre, telefono FROM contacts WHERE id IN (${placeholders})`,
+      `SELECT id, nombre, telefono FROM waba_contacts WHERE id IN (${placeholders})`,
       contact_ids
     );
 
