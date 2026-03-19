@@ -13,14 +13,25 @@ import { fetchOrdersByDateRange } from '../services/woocommerce.js';
 
 const router = Router();
 
-// GET /api/campaigns — lista todas las campañas ordenadas por fecha
+// GET /api/campaigns — lista todas las campañas con sus conversiones
 router.get('/', async (req, res) => {
   try {
+    // JOIN con waba_conversions para incluir datos de conversión en el listado
     const result = await query(
-      `SELECT id, nombre, template_name, template_language, scheduled_at, status,
-              total_contacts, sent_count, delivered_count, read_count, failed_count, created_at
-       FROM waba_campaigns
-       ORDER BY created_at DESC
+      `SELECT c.id, c.nombre, c.template_name, c.template_language, c.scheduled_at, c.status,
+              c.total_contacts, c.sent_count, c.delivered_count, c.read_count, c.failed_count,
+              c.created_at,
+              COALESCE(cv.conversions_count, 0)  AS conversions_count,
+              COALESCE(cv.conversions_revenue, 0) AS conversions_revenue
+       FROM waba_campaigns c
+       LEFT JOIN (
+         SELECT campaign_id,
+                COUNT(*)          AS conversions_count,
+                SUM(order_amount) AS conversions_revenue
+         FROM waba_conversions
+         GROUP BY campaign_id
+       ) cv ON cv.campaign_id = c.id
+       ORDER BY c.created_at DESC
        LIMIT 100`
     );
     res.json({ success: true, data: result.rows });
@@ -33,7 +44,7 @@ router.get('/', async (req, res) => {
 // GET /api/campaigns/stats — métricas globales para el dashboard
 router.get('/stats', async (req, res) => {
   try {
-    const [campaignsStats, messagesStats] = await Promise.all([
+    const [campaignsStats, messagesStats, conversionStats] = await Promise.all([
       query(
         `SELECT
            COUNT(*) FILTER (WHERE status = 'scheduled')  AS scheduled,
@@ -52,13 +63,36 @@ router.get('/stats', async (req, res) => {
            COUNT(*) AS total
          FROM waba_message_logs`
       ),
+      // Conversiones globales: % de emails únicos que compraron
+      query(
+        `SELECT
+           COUNT(DISTINCT wc.email)                    AS total_conversions,
+           COALESCE(SUM(wc.order_amount), 0)           AS total_revenue,
+           COUNT(DISTINCT ml.email)
+             FILTER (WHERE ml.email IS NOT NULL)       AS total_with_email
+         FROM waba_message_logs ml
+         LEFT JOIN waba_conversions wc ON wc.email = ml.email`
+      ),
     ]);
+
+    const cv = conversionStats.rows[0];
+    const totalWithEmail   = parseInt(cv.total_with_email) || 0;
+    const totalConversions = parseInt(cv.total_conversions) || 0;
+    const conversionRate   = totalWithEmail > 0
+      ? ((totalConversions / totalWithEmail) * 100).toFixed(1)
+      : null; // null = aún no hay emails cargados
 
     res.json({
       success: true,
       data: {
-        campaigns: campaignsStats.rows[0],
-        messages: messagesStats.rows[0],
+        campaigns:  campaignsStats.rows[0],
+        messages:   messagesStats.rows[0],
+        conversions: {
+          total_conversions: totalConversions,
+          total_revenue:     parseFloat(cv.total_revenue),
+          total_with_email:  totalWithEmail,
+          conversion_rate:   conversionRate, // "12.5" o null
+        },
       },
     });
   } catch (err) {
