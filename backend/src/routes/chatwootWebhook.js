@@ -23,79 +23,12 @@ const META_API_VERSION = 'v21.0';
 const META_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
 
 // POST /api/chatwoot/webhook — evento de Chatwoot
-router.post('/webhook', async (req, res) => {
-  // Responder 200 inmediatamente para que Chatwoot no reintente
+// Nota: el envío a WhatsApp se maneja exclusivamente desde inbox.js para evitar
+// duplicados. Este endpoint solo recibe el evento y responde 200 a Chatwoot.
+router.post('/webhook', (req, res) => {
   res.status(200).send('OK');
-
-  try {
-    const event = req.body;
-
-    // Solo procesar mensajes nuevos de tipo 'outgoing' (respuestas del agente)
-    // message_type: 0 = incoming, 1 = outgoing, 2 = activity
-    const isMessageCreated = event.event === 'message_created';
-    const isOutgoing = event.message_type === 'outgoing' || event.message_type === 1;
-
-    // Ignorar mensajes privados (notas internas del equipo)
-    const isPrivate = event.private === true;
-
-    if (!isMessageCreated || !isOutgoing || isPrivate) {
-      return;
-    }
-
-    // Si el mensaje fue creado por nuestra app (inbox route), lo ignoramos
-    // para evitar duplicados. Nuestra app ya envía el WhatsApp antes de crear
-    // el mensaje en Chatwoot. Solo procesamos mensajes creados desde la UI de Chatwoot.
-    const createdByApp = event.content_attributes?.created_by_app === true;
-    if (createdByApp) {
-      console.debug('[ChatwootWebhook] Mensaje creado por la app, ignorando para evitar duplicado');
-      return;
-    }
-
-    const conversationId = event.conversation?.id;
-    const messageText = event.content;
-
-    if (!conversationId || !messageText) {
-      console.warn('[ChatwootWebhook] Evento sin conversation_id o content, ignorando');
-      return;
-    }
-
-    // Obtener el teléfono del contacto desde la conversación
-    const conversation = await getConversation(conversationId);
-    const telefono = conversation.meta?.sender?.phone_number?.replace(/^\+/, '');
-
-    if (!telefono) {
-      console.warn(`[ChatwootWebhook] No se encontró teléfono para conversación ${conversationId}`);
-      return;
-    }
-
-    // Enviar por WhatsApp usando la API de Meta (mensaje de texto libre)
-    const { token, phoneNumberId } = await getConfig();
-
-    const waRes = await axios.post(
-      `${META_BASE_URL}/${phoneNumberId}/messages`,
-      {
-        messaging_product: 'whatsapp',
-        to: telefono,
-        type: 'text',
-        text: { body: messageText },
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 10000,
-      }
-    );
-
-    const waMessageId = waRes.data?.messages?.[0]?.id;
-    console.log(
-      `[ChatwootWebhook] Mensaje del agente reenviado a WhatsApp — para: ${telefono}, msgId: ${waMessageId}`
-    );
-  } catch (err) {
-    const detail = err.response?.data?.error?.message || err.message;
-    console.error('[ChatwootWebhook] Error procesando evento:', detail);
-  }
+  // Los mensajes salientes ya fueron enviados por WhatsApp desde inbox.js
+  // antes de ser registrados en Chatwoot. No hay nada que hacer acá.
 });
 
 export default router;
