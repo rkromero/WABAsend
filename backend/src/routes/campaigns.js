@@ -9,6 +9,7 @@
 
 import { Router } from 'express';
 import { query } from '../db/index.js';
+import { fetchOrdersByDateRange } from '../services/woocommerce.js';
 
 const router = Router();
 
@@ -126,7 +127,7 @@ router.post('/', async (req, res) => {
     // Usamos placeholders dinámicos para la cláusula IN
     const placeholders = contact_ids.map((_, i) => `$${i + 1}`).join(',');
     const contactsResult = await query(
-      `SELECT id, nombre, telefono FROM waba_contacts WHERE id IN (${placeholders})`,
+      `SELECT id, nombre, telefono, email FROM waba_contacts WHERE id IN (${placeholders})`,
       contact_ids
     );
 
@@ -149,15 +150,147 @@ router.post('/', async (req, res) => {
     // Crear un message_log por cada contacto
     for (const contact of contacts) {
       await query(
-        `INSERT INTO waba_message_logs (campaign_id, contact_id, telefono, nombre, status)
-         VALUES ($1, $2, $3, $4, 'pending')`,
-        [campaign.id, contact.id, contact.telefono, contact.nombre]
+        `INSERT INTO waba_message_logs (campaign_id, contact_id, telefono, nombre, email, status)
+         VALUES ($1, $2, $3, $4, $5, 'pending')`,
+        [campaign.id, contact.id, contact.telefono, contact.nombre, contact.email || null]
       );
     }
 
     res.status(201).json({ success: true, data: campaign });
   } catch (err) {
     console.error('[Campaigns] POST error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/campaigns/:id/conversions — obtener conversiones ya calculadas
+router.get('/:id/conversions', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ success: false, error: 'ID inválido' });
+
+  try {
+    const [campaign, conversions] = await Promise.all([
+      query('SELECT id, nombre, scheduled_at, total_contacts FROM waba_campaigns WHERE id = $1', [id]),
+      query(
+        `SELECT email, woo_order_id, order_amount, order_date
+         FROM waba_conversions WHERE campaign_id = $1
+         ORDER BY order_date DESC`,
+        [id]
+      ),
+    ]);
+
+    if (campaign.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Campaña no encontrada' });
+    }
+
+    const totalRevenue = conversions.rows.reduce((sum, r) => sum + parseFloat(r.order_amount || 0), 0);
+
+    res.json({
+      success: true,
+      data: {
+        campaign:          campaign.rows[0],
+        conversions:       conversions.rows,
+        total_conversions: conversions.rows.length,
+        total_revenue:     totalRevenue,
+      },
+    });
+  } catch (err) {
+    console.error('[Campaigns] GET conversions error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/campaigns/:id/check-conversions — ejecutar matching de emails vs WooCommerce
+// Query param: ?days=7 (ventana de atribución, default 30)
+router.post('/:id/check-conversions', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ success: false, error: 'ID inválido' });
+
+  if (!process.env.WOOCOMMERCE_URL) {
+    return res.status(400).json({ success: false, error: 'WooCommerce no está configurado' });
+  }
+
+  const attributionDays = Math.min(90, Math.max(1, parseInt(req.query.days) || 30));
+
+  try {
+    // Obtener la campaña
+    const campaignResult = await query(
+      'SELECT id, nombre, scheduled_at, total_contacts FROM waba_campaigns WHERE id = $1',
+      [id]
+    );
+    if (campaignResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Campaña no encontrada' });
+    }
+    const campaign = campaignResult.rows[0];
+
+    // Obtener emails de los destinatarios (solo los que tienen email)
+    const logsResult = await query(
+      `SELECT DISTINCT email FROM waba_message_logs
+       WHERE campaign_id = $1 AND email IS NOT NULL AND email != ''`,
+      [id]
+    );
+
+    const campaignEmails = new Set(logsResult.rows.map((r) => r.email.toLowerCase()));
+
+    if (campaignEmails.size === 0) {
+      return res.json({
+        success: true,
+        data: {
+          message:           'Ningún contacto de esta campaña tiene email registrado',
+          total_conversions: 0,
+          total_revenue:     0,
+          attribution_days:  attributionDays,
+        },
+      });
+    }
+
+    // Rango de fechas: desde el envío hasta N días después
+    const after  = new Date(campaign.scheduled_at);
+    const before = new Date(after.getTime() + attributionDays * 24 * 60 * 60 * 1000);
+
+    console.log(`[Campaigns] Buscando conversiones para campaña ${id} — emails: ${campaignEmails.size}, rango: ${after.toISOString()} → ${before.toISOString()}`);
+
+    // Traer todas las órdenes del período y filtrar por email
+    const orders = await fetchOrdersByDateRange(after, before);
+    const matched = orders.filter((o) => campaignEmails.has(o.billing_email));
+
+    // Guardar las conversiones nuevas (el UNIQUE evita duplicados)
+    let saved = 0;
+    for (const order of matched) {
+      try {
+        await query(
+          `INSERT INTO waba_conversions (campaign_id, email, woo_order_id, order_amount, order_date)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (campaign_id, woo_order_id) DO NOTHING`,
+          [id, order.billing_email, order.id, order.total, new Date(order.date_created)]
+        );
+        saved++;
+      } catch {
+        // Silencioso: el ON CONFLICT DO NOTHING ya maneja duplicados
+      }
+    }
+
+    const totalRevenue = matched.reduce((sum, o) => sum + o.total, 0);
+
+    console.log(`[Campaigns] Campaña ${id}: ${matched.length} conversiones encontradas, revenue: $${totalRevenue}`);
+
+    res.json({
+      success: true,
+      data: {
+        total_conversions:   matched.length,
+        total_revenue:       totalRevenue,
+        emails_with_data:    campaignEmails.size,
+        total_contacts:      campaign.total_contacts,
+        conversion_rate:     campaignEmails.size > 0
+          ? ((matched.length / campaignEmails.size) * 100).toFixed(1)
+          : '0.0',
+        attribution_days:    attributionDays,
+        orders_in_period:    orders.length,
+        new_conversions:     saved,
+      },
+    });
+  } catch (err) {
+    console.error('[Campaigns] check-conversions error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });

@@ -130,6 +130,17 @@ export async function initSchema() {
       updated_at            TIMESTAMP DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS waba_conversions (
+      id            SERIAL PRIMARY KEY,
+      campaign_id   INT REFERENCES waba_campaigns(id) ON DELETE CASCADE,
+      email         VARCHAR(255) NOT NULL,
+      woo_order_id  INT NOT NULL,
+      order_amount  DECIMAL(12,2),
+      order_date    TIMESTAMP,
+      created_at    TIMESTAMP DEFAULT NOW(),
+      UNIQUE(campaign_id, woo_order_id)
+    );
+
     CREATE TABLE IF NOT EXISTS waba_conversation_overrides (
       telefono    VARCHAR(20)  PRIMARY KEY,
       bot_paused  BOOLEAN      NOT NULL DEFAULT false,
@@ -147,16 +158,25 @@ export async function initSchema() {
     );
   `);
 
-  // 2. Migración: agregar columna variantes para productos con talles/colores
+  // 2. Migraciones: agregar columnas nuevas a tablas existentes
+  const migrations = [
+    `ALTER TABLE waba_contacts     ADD COLUMN IF NOT EXISTS email VARCHAR(255)`,
+    `ALTER TABLE waba_message_logs ADD COLUMN IF NOT EXISTS email VARCHAR(255)`,
+  ];
+  for (const m of migrations) {
+    try { await pool.query(m); } catch (err) {
+      console.warn('[DB] Migration warning:', err.message.split('\n')[0]);
+    }
+  }
+
+  // 3. Migración: columna variantes en productos
   try {
-    await pool.query(
-      `ALTER TABLE waba_products ADD COLUMN IF NOT EXISTS variantes TEXT`
-    );
+    await pool.query(`ALTER TABLE waba_products ADD COLUMN IF NOT EXISTS variantes TEXT`);
   } catch (err) {
     console.warn('[DB] variantes migration warning:', err.message.split('\n')[0]);
   }
 
-  // 3. Índices de performance
+  // 4. Índices de performance
   try {
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_waba_message_logs_campaign_id

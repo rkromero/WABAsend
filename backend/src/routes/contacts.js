@@ -5,6 +5,7 @@
  *
  * NOTA: La tabla se llama `waba_contacts` (no `contacts`) para evitar colisión
  * con la tabla `contacts` que Chatwoot crea en la misma base de datos.
+ * El email se usa para tracking de conversiones contra WooCommerce.
  */
 
 import { Router } from 'express';
@@ -20,25 +21,29 @@ router.get('/', async (req, res) => {
   const offset = (page - 1) * limit;
 
   try {
-    let whereClause = '';
-    let params = [limit, offset];
+    let dataWhere  = '';
+    let countWhere = '';
+    const dataParams  = [limit, offset];
+    const countParams = [];
 
     if (search) {
-      whereClause = " WHERE nombre ILIKE $3 OR telefono ILIKE $3";
-      params.push(`%${search}%`);
+      dataWhere  = ' WHERE nombre ILIKE $3 OR telefono ILIKE $3 OR email ILIKE $3';
+      countWhere = ' WHERE nombre ILIKE $1 OR telefono ILIKE $1 OR email ILIKE $1';
+      dataParams.push(`%${search}%`);
+      countParams.push(`%${search}%`);
     }
 
     const [dataResult, countResult] = await Promise.all([
       query(
-        `SELECT id, nombre, telefono, created_at
-         FROM waba_contacts${whereClause}
+        `SELECT id, nombre, telefono, email, created_at
+         FROM waba_contacts${dataWhere}
          ORDER BY created_at DESC
          LIMIT $1 OFFSET $2`,
-        params
+        dataParams
       ),
       query(
-        `SELECT COUNT(*) as total FROM waba_contacts${whereClause}`,
-        search ? [`%${search}%`] : []
+        `SELECT COUNT(*) as total FROM waba_contacts${countWhere}`,
+        countParams
       ),
     ]);
 
@@ -73,7 +78,7 @@ router.get('/count', async (req, res) => {
 });
 
 // POST /api/contacts/bulk — importar múltiples contactos desde Excel
-// Body: { contacts: [{ nombre, telefono }] }
+// Body: { contacts: [{ nombre, telefono, email? }] }
 router.post('/bulk', async (req, res) => {
   const { contacts } = req.body;
 
@@ -94,8 +99,10 @@ router.post('/bulk', async (req, res) => {
 
   try {
     for (const contact of contacts) {
-      const nombre = String(contact.nombre || '').trim();
-      const telefono = String(contact.telefono || '').replace(/\D/g, ''); // solo dígitos
+      const nombre   = String(contact.nombre || '').trim();
+      const telefono = String(contact.telefono || '').replace(/\D/g, '');
+      // Email es opcional — lo normalizamos a null si viene vacío
+      const email    = contact.email ? String(contact.email).trim().toLowerCase() : null;
 
       if (!nombre) {
         errors.push({ telefono, error: 'Nombre vacío' });
@@ -113,22 +120,29 @@ router.post('/bulk', async (req, res) => {
         continue;
       }
 
+      // Validación básica de email si se proporcionó
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        errors.push({ nombre, telefono, error: `Email inválido: "${email}"` });
+        skipped++;
+        continue;
+      }
+
       try {
-        // Verificar si ya existe para evitar error de unique constraint
         const existing = await query(
           'SELECT id FROM waba_contacts WHERE telefono = $1',
           [telefono]
         );
 
         if (existing.rows.length > 0) {
+          // Actualizar nombre y email (si vino con email)
           await query(
-            'UPDATE waba_contacts SET nombre = $1 WHERE telefono = $2',
-            [nombre, telefono]
+            'UPDATE waba_contacts SET nombre = $1, email = COALESCE($2, email) WHERE telefono = $3',
+            [nombre, email, telefono]
           );
         } else {
           await query(
-            'INSERT INTO waba_contacts (nombre, telefono) VALUES ($1, $2)',
-            [nombre, telefono]
+            'INSERT INTO waba_contacts (nombre, telefono, email) VALUES ($1, $2, $3)',
+            [nombre, telefono, email]
           );
         }
         imported++;

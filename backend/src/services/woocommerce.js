@@ -492,3 +492,53 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
     return [];
   }
 }
+
+/**
+ * Trae órdenes de WooCommerce dentro de un rango de fechas.
+ * Se usa para el tracking de conversiones: comparamos los emails
+ * de los destinatarios de una campaña contra los compradores del período.
+ *
+ * @param {Date} after  - Fecha de inicio (inclusive)
+ * @param {Date} before - Fecha de fin (inclusive)
+ * @returns {Promise<Array<{id, billing_email, total, date_created}>>}
+ */
+export async function fetchOrdersByDateRange(after, before) {
+  const client = getWooClient();
+  const orders = [];
+  let page = 1;
+
+  // WooCommerce pagina las órdenes — recorremos hasta que no haya más
+  while (true) {
+    const res = await client.get('/orders', {
+      params: {
+        after:    after.toISOString(),
+        before:   before.toISOString(),
+        per_page: 100,
+        page,
+        // Solo órdenes confirmadas o en proceso — excluimos canceladas, pendientes, etc.
+        status:   'completed,processing',
+      },
+    });
+
+    const batch = res.data || [];
+    if (batch.length === 0) break;
+
+    for (const order of batch) {
+      if (order.billing?.email) {
+        orders.push({
+          id:            order.id,
+          billing_email: order.billing.email.toLowerCase().trim(),
+          total:         parseFloat(order.total) || 0,
+          date_created:  order.date_created,
+        });
+      }
+    }
+
+    // Si trajo menos de 100, no hay más páginas
+    if (batch.length < 100) break;
+    page++;
+  }
+
+  console.log(`[WooCommerce] Órdenes en rango: ${orders.length}`);
+  return orders;
+}

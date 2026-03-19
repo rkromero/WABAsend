@@ -33,16 +33,17 @@ export default function ExcelUploader({ onImported }) {
             Object.entries(row).map(([k, v]) => [k.toLowerCase().trim(), String(v).trim()])
           );
 
-          const nombre   = normalized['nombre'] || normalized['name'] || '';
+            const nombre   = normalized['nombre'] || normalized['name'] || '';
           const telefono = (normalized['telefono'] || normalized['phone'] || normalized['tel'] || '')
-            .replace(/\D/g, ''); // solo dígitos
+            .replace(/\D/g, '');
+          const email    = (normalized['email'] || normalized['correo'] || normalized['mail'] || '').toLowerCase().trim();
 
           if (!nombre) {
             errors.push({ fila: i + 2, problema: 'Nombre vacío', telefono });
           } else if (telefono.length < 10 || telefono.length > 15) {
             errors.push({ fila: i + 2, problema: `Teléfono inválido: "${telefono}"`, nombre });
           } else {
-            contacts.push({ nombre, telefono });
+            contacts.push({ nombre, telefono, email: email || null });
           }
         });
 
@@ -172,8 +173,8 @@ export default function ExcelUploader({ onImported }) {
             o hacé clic para seleccionar — .xlsx / .xls
           </p>
           <p className="text-xs text-gray-600 mt-3">
-            El archivo debe tener columnas: <code className="text-accent/80">nombre</code> y{' '}
-            <code className="text-accent/80">telefono</code>
+            Columnas requeridas: <code className="text-accent/80">nombre</code>, <code className="text-accent/80">telefono</code>
+            {' '}· Opcional: <code className="text-accent/80">email</code> (para tracking de conversiones)
           </p>
         </div>
       )}
@@ -208,14 +209,16 @@ export default function ExcelUploader({ onImported }) {
                 <thead>
                   <tr className="text-left text-xs text-gray-500">
                     <th className="pb-2 pr-4">Nombre</th>
-                    <th className="pb-2">Teléfono</th>
+                    <th className="pb-2 pr-4">Teléfono</th>
+                    <th className="pb-2">Email</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-base-border">
                   {preview.contacts.slice(0, 10).map((c, i) => (
                     <tr key={i}>
                       <td className="py-2 pr-4 text-gray-200">{c.nombre}</td>
-                      <td className="py-2 text-gray-400 font-mono text-xs">{c.telefono}</td>
+                      <td className="py-2 pr-4 text-gray-400 font-mono text-xs">{c.telefono}</td>
+                      <td className="py-2 text-gray-400 text-xs">{c.email || <span className="text-gray-600">—</span>}</td>
                     </tr>
                   ))}
                 </tbody>

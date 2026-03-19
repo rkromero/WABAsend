@@ -85,7 +85,7 @@ export default function Contacts() {
         <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500" />
         <input
           className="input-field pl-9"
-          placeholder="Buscar por nombre o teléfono..."
+          placeholder="Buscar por nombre, teléfono o email..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -117,6 +117,9 @@ export default function Contacts() {
                   <th className="text-left py-3 px-5 text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Teléfono
                   </th>
+                  <th className="text-left py-3 px-5 text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">
+                    Email
+                  </th>
                   <th className="text-left py-3 px-5 text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
                     Importado
                   </th>
@@ -128,6 +131,9 @@ export default function Contacts() {
                   <tr key={c.id} className="hover:bg-white/[0.02] transition-colors group">
                     <td className="py-3 px-5 text-gray-200 font-medium">{c.nombre}</td>
                     <td className="py-3 px-5 text-gray-400 font-mono text-xs">{c.telefono}</td>
+                    <td className="py-3 px-5 text-gray-400 text-xs hidden md:table-cell">
+                      {c.email || <span className="text-gray-600">—</span>}
+                    </td>
                     <td className="py-3 px-5 text-gray-500 text-xs hidden lg:table-cell">
                       {format(new Date(c.created_at), 'dd MMM yyyy', { locale: es })}
                     </td>
