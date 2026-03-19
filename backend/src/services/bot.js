@@ -7,10 +7,16 @@
  * Lee la configuración del bot desde la tabla config en PostgreSQL.
  * Solo responde si el bot está habilitado y dentro del horario configurado.
  * Usa gpt-4o-mini para generar respuestas en lenguaje natural.
+ *
+ * Integración con WooCommerce:
+ *  Antes de llamar a GPT, busca productos relevantes en waba_products según
+ *  el mensaje del usuario e inyecta la lista en el system prompt.
+ *  Esto permite que el bot recomiende productos reales y en stock.
  */
 
 import OpenAI from 'openai';
 import { query } from '../db/index.js';
+import { searchRelevantProducts } from './woocommerce.js';
 
 // El cliente OpenAI toma la API key del entorno automáticamente (OPENAI_API_KEY)
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -103,8 +109,36 @@ export async function shouldBotRespond() {
 }
 
 /**
+ * Formatea la lista de productos para incluirla en el system prompt.
+ * Convierte los datos de DB a texto legible para el modelo.
+ *
+ * @param {Array} products - Productos de waba_products
+ * @returns {string} Bloque de texto con los productos
+ */
+function formatProductsForPrompt(products) {
+  if (!products || products.length === 0) return '';
+
+  const lines = products.map((p) => {
+    const precio = p.precio_oferta
+      ? `$${p.precio_oferta} (antes $${p.precio})`
+      : `$${p.precio}`;
+    const stock = p.stock > 0 ? `Stock disponible: ${p.stock}` : 'Último disponible';
+    const desc = p.descripcion_vision || p.nombre;
+    const link = p.permalink ? ` | Link: ${p.permalink}` : '';
+    return `• ${p.nombre} — ${desc} | Precio: ${precio} | ${stock}${link}`;
+  });
+
+  return `\n\nPRODUCTOS DISPONIBLES EN STOCK:\n${lines.join('\n')}`;
+}
+
+/**
  * Genera una respuesta usando OpenAI gpt-4o-mini.
- * Incluye el historial de conversación para dar contexto al modelo.
+ * Incluye el historial de conversación y productos relevantes del catálogo.
+ *
+ * Flujo:
+ *  1. Buscar productos relevantes según el mensaje del usuario
+ *  2. Armar el system prompt con las instrucciones + productos encontrados
+ *  3. Llamar a GPT con el historial + mensaje actual
  *
  * @param {string} userMessage           - Mensaje actual del usuario
  * @param {Array<{role: string, content: string}>} conversationHistory - Últimos mensajes previos
@@ -117,11 +151,30 @@ export async function generateBotResponse(userMessage, conversationHistory = [])
     throw new Error('OPENAI_API_KEY no está definida en las variables de entorno');
   }
 
+  // Buscar productos relevantes en el catálogo según el mensaje del usuario.
+  // Si no hay WooCommerce configurado, la lista queda vacía y el bot responde sin catálogo.
+  let productosContext = '';
+  try {
+    if (process.env.WOOCOMMERCE_URL) {
+      const products = await searchRelevantProducts(userMessage, 6);
+      productosContext = formatProductsForPrompt(products);
+      if (products.length > 0) {
+        console.log(`[Bot] ${products.length} producto(s) relevante(s) inyectados en el prompt`);
+      }
+    }
+  } catch (err) {
+    // No cortamos el bot si falla la búsqueda de productos
+    console.warn('[Bot] No se pudieron buscar productos:', err.message);
+  }
+
+  // System prompt = instrucciones del usuario + productos disponibles
+  const systemPrompt = config.prompt + productosContext;
+
   const response = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
     messages: [
-      { role: 'system', content: config.prompt },
-      // Incluimos los últimos N mensajes para que el modelo tenga contexto de la conversación
+      { role: 'system', content: systemPrompt },
+      // Últimos N mensajes para que el modelo tenga contexto de la conversación
       ...conversationHistory,
       { role: 'user', content: userMessage },
     ],

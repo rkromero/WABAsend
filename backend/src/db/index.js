@@ -112,6 +112,24 @@ export async function initSchema() {
       updated_at            TIMESTAMP             DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS waba_products (
+      id                    SERIAL PRIMARY KEY,
+      woo_id                INT NOT NULL UNIQUE,
+      nombre                VARCHAR(500) NOT NULL,
+      descripcion_original  TEXT,
+      descripcion_vision    TEXT,
+      precio                DECIMAL(12,2),
+      precio_oferta         DECIMAL(12,2),
+      stock                 INT DEFAULT 0,
+      categorias            TEXT,
+      imagen_url            TEXT,
+      permalink             TEXT,
+      activo                BOOLEAN DEFAULT true,
+      vision_generado_at    TIMESTAMP,
+      created_at            TIMESTAMP DEFAULT NOW(),
+      updated_at            TIMESTAMP DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS incoming_messages (
       id                        SERIAL PRIMARY KEY,
       telefono                  VARCHAR(20) NOT NULL,
@@ -132,6 +150,10 @@ export async function initSchema() {
         ON waba_message_logs(whatsapp_message_id);
       CREATE INDEX IF NOT EXISTS idx_incoming_messages_telefono
         ON incoming_messages(telefono);
+      CREATE INDEX IF NOT EXISTS idx_waba_products_activo_stock
+        ON waba_products(activo, stock);
+      CREATE INDEX IF NOT EXISTS idx_waba_products_woo_id
+        ON waba_products(woo_id);
       CREATE UNIQUE INDEX IF NOT EXISTS waba_contacts_telefono_unique
         ON waba_contacts(telefono);
     `);

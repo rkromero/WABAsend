@@ -12,6 +12,7 @@ import dotenv from 'dotenv';
 
 import { initSchema } from './db/index.js';
 import { startScheduler } from './services/scheduler.js';
+import { syncProducts } from './services/woocommerce.js';
 
 import configRouter from './routes/config.js';
 import templatesRouter from './routes/templates.js';
@@ -21,6 +22,7 @@ import webhookRouter from './routes/webhook.js';
 import inboxRouter from './routes/inbox.js';
 import chatwootWebhookRouter from './routes/chatwootWebhook.js';
 import botRouter from './routes/bot.js';
+import productsRouter from './routes/products.js';
 
 dotenv.config();
 
@@ -79,6 +81,7 @@ app.use('/api/campaigns', campaignsRouter);
 app.use('/api/inbox', inboxRouter);
 app.use('/api/chatwoot', chatwootWebhookRouter);
 app.use('/api/bot', botRouter);
+app.use('/api/products', productsRouter);
 app.use('/webhook', webhookRouter);
 
 // --- Manejo global de errores ---
@@ -100,6 +103,20 @@ async function start() {
   }
 
   startScheduler();
+
+  // Sync de productos WooCommerce: al arrancar y cada 30 minutos
+  if (process.env.WOOCOMMERCE_URL) {
+    const runSync = () => {
+      syncProducts().catch((err) =>
+        console.error('[Server] Error en sync WooCommerce:', err.message)
+      );
+    };
+    runSync(); // sync inmediata al iniciar
+    setInterval(runSync, 30 * 60 * 1000); // cada 30 minutos
+    console.log('[Server] Sync WooCommerce iniciada (cada 30 min)');
+  } else {
+    console.warn('[Server] WOOCOMMERCE_URL no definida — sync de productos desactivada');
+  }
 
   app.listen(PORT, () => {
     console.log(`[Server] Escuchando en puerto ${PORT}`);
