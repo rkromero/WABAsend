@@ -7,11 +7,13 @@ import {
   Send,
   Settings,
   MessageSquareMore,
+  MessageSquare,
 } from 'lucide-react';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/campaigns', icon: Send, label: 'Campañas' },
+  { to: '/inbox', icon: MessageSquare, label: 'Bandeja' },
   { to: '/contacts', icon: Users, label: 'Contactos' },
   { to: '/templates', icon: FileText, label: 'Plantillas' },
   { to: '/settings', icon: Settings, label: 'Configuración' },

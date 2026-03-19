@@ -1,14 +1,22 @@
 /**
  * Rutas del webhook de Meta
  * Autor: Turnio
- * Fecha: 2026-03-18
+ * Fecha: 2026-03-18 (actualizado: 2026-03-19)
  *
- * Meta envía callbacks de estado de mensajes a este endpoint.
- * Estados posibles: sent → delivered → read / failed
+ * Meta envía dos tipos de callbacks a este endpoint:
+ * 1. Actualizaciones de estado de mensajes enviados (statuses): sent → delivered → read / failed
+ * 2. Mensajes entrantes de usuarios (messages): texto recibido desde WhatsApp
+ *
+ * Los mensajes entrantes se sincronizan con Chatwoot para gestión en bandeja de entrada.
  */
 
 import { Router } from 'express';
 import { query } from '../db/index.js';
+import {
+  getOrCreateContact,
+  getOrCreateConversation,
+  sendMessageToConversation,
+} from '../services/chatwoot.js';
 
 const router = Router();
 
@@ -39,7 +47,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST /webhook — recibe actualizaciones de estado de mensajes
+// POST /webhook — recibe actualizaciones de estado y mensajes entrantes
 router.post('/', async (req, res) => {
   // Meta espera un 200 rápido para no reintentar
   res.status(200).send('OK');
@@ -55,9 +63,29 @@ router.post('/', async (req, res) => {
       for (const change of entry.changes || []) {
         if (change.field !== 'messages') continue;
 
-        const statuses = change.value?.statuses || [];
+        const value = change.value || {};
+
+        // --- Procesar actualizaciones de estado (mensajes enviados por nosotros) ---
+        const statuses = value.statuses || [];
         for (const status of statuses) {
           await processStatusUpdate(status);
+        }
+
+        // --- Procesar mensajes entrantes (mensajes que nos envían los usuarios) ---
+        const messages = value.messages || [];
+        for (const msg of messages) {
+          // Solo procesamos mensajes de texto; ignoramos imágenes, audio, etc. por ahora
+          if (msg.type !== 'text') continue;
+
+          const telefono = msg.from; // número del remitente en formato internacional
+          const messageText = msg.text?.body || '';
+          const waMessageId = msg.id;
+
+          // El nombre del contacto viene en el array `contacts` del mismo payload
+          const contactProfile = value.contacts?.find((c) => c.wa_id === telefono);
+          const nombre = contactProfile?.profile?.name || telefono;
+
+          await processIncomingMessage({ telefono, nombre, messageText, waMessageId });
         }
       }
     }
@@ -65,6 +93,45 @@ router.post('/', async (req, res) => {
     console.error('[Webhook] Error procesando callback:', err.message);
   }
 });
+
+/**
+ * Procesa un mensaje de texto entrante de WhatsApp.
+ * Guarda en DB local y sincroniza con Chatwoot.
+ *
+ * @param {Object} params
+ * @param {string} params.telefono     - Número del remitente
+ * @param {string} params.nombre       - Nombre del remitente
+ * @param {string} params.messageText  - Texto del mensaje
+ * @param {string} params.waMessageId  - ID del mensaje en WhatsApp
+ */
+async function processIncomingMessage({ telefono, nombre, messageText, waMessageId }) {
+  let chatwootConversationId = null;
+
+  // Intentar sincronizar con Chatwoot (falla silenciosamente si no está configurado)
+  try {
+    const contact = await getOrCreateContact(telefono, nombre);
+    const conversation = await getOrCreateConversation(contact.id);
+    chatwootConversationId = conversation.id;
+
+    await sendMessageToConversation(conversation.id, messageText, 'incoming');
+    console.log(`[Webhook] Mensaje entrante de ${telefono} sincronizado con Chatwoot (conv: ${conversation.id})`);
+  } catch (err) {
+    // No cortar el flujo si Chatwoot falla — igual guardamos el mensaje localmente
+    console.warn('[Webhook] No se pudo sincronizar con Chatwoot:', err.message);
+  }
+
+  // Guardar en tabla local para trazabilidad
+  try {
+    await query(
+      `INSERT INTO incoming_messages (telefono, nombre, message, whatsapp_message_id, chatwoot_conversation_id)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [telefono, nombre, messageText, waMessageId, chatwootConversationId]
+    );
+    console.log(`[Webhook] Mensaje entrante guardado — de: ${telefono}`);
+  } catch (err) {
+    console.error('[Webhook] Error guardando mensaje entrante en DB:', err.message);
+  }
+}
 
 /**
  * Procesa una actualización de estado de un mensaje individual.

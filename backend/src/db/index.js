@@ -111,6 +111,21 @@ export async function initSchema() {
     -- Índice para acelerar búsquedas de logs por whatsapp_message_id (webhook)
     CREATE INDEX IF NOT EXISTS idx_message_logs_wa_message_id
       ON message_logs(whatsapp_message_id);
+
+    -- Mensajes entrantes de WhatsApp (para la bandeja de entrada Chatwoot)
+    CREATE TABLE IF NOT EXISTS incoming_messages (
+      id                        SERIAL PRIMARY KEY,
+      telefono                  VARCHAR(20) NOT NULL,
+      nombre                    VARCHAR(255),
+      message                   TEXT NOT NULL,
+      whatsapp_message_id       VARCHAR(255),
+      chatwoot_conversation_id  INT,
+      created_at                TIMESTAMP DEFAULT NOW()
+    );
+
+    -- Índice para buscar mensajes por teléfono (historial de conversación)
+    CREATE INDEX IF NOT EXISTS idx_incoming_messages_telefono
+      ON incoming_messages(telefono);
   `;
 
   await pool.query(sql);
