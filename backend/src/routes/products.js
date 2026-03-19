@@ -78,6 +78,7 @@ router.get('/stats', async (req, res) => {
 });
 
 // POST /api/products/sync — forzar sync manual desde el panel
+// Body opcional: { full: true } para ignorar el delta y sincronizar todo
 router.post('/sync', async (req, res) => {
   if (!process.env.WOOCOMMERCE_URL) {
     return res.status(400).json({
@@ -86,9 +87,11 @@ router.post('/sync', async (req, res) => {
     });
   }
 
+  const forceFullSync = req.body?.full === true;
+
   try {
-    console.log('[Products] Sync manual iniciada desde el panel');
-    const result = await syncProducts();
+    console.log(`[Products] Sync manual iniciada (${forceFullSync ? 'full' : 'delta'})`);
+    const result = await syncProducts(forceFullSync);
     res.json({ success: true, data: result });
   } catch (err) {
     console.error('[Products] Error en sync manual:', err.message);

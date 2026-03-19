@@ -10,6 +10,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 
+import cron from 'node-cron';
 import { initSchema } from './db/index.js';
 import { startScheduler } from './services/scheduler.js';
 import { syncProducts } from './services/woocommerce.js';
@@ -104,16 +105,23 @@ async function start() {
 
   startScheduler();
 
-  // Sync de productos WooCommerce: al arrancar y cada 30 minutos
+  // Sync de productos WooCommerce
   if (process.env.WOOCOMMERCE_URL) {
-    const runSync = () => {
+    // Sync inicial al arrancar el servidor (full o delta según historial)
+    syncProducts().catch((err) =>
+      console.error('[Server] Error en sync inicial WooCommerce:', err.message)
+    );
+
+    // Sync diaria a las 2:00 AM Argentina (UTC-3 = 05:00 UTC)
+    // Cron: minuto 0, hora 5, cualquier día
+    cron.schedule('0 5 * * *', () => {
+      console.log('[Server] Sync diaria WooCommerce (2 AM Argentina)');
       syncProducts().catch((err) =>
-        console.error('[Server] Error en sync WooCommerce:', err.message)
+        console.error('[Server] Error en sync diaria WooCommerce:', err.message)
       );
-    };
-    runSync(); // sync inmediata al iniciar
-    setInterval(runSync, 30 * 60 * 1000); // cada 30 minutos
-    console.log('[Server] Sync WooCommerce iniciada (cada 30 min)');
+    });
+
+    console.log('[Server] Sync WooCommerce activada — diaria a las 2:00 AM (Argentina)');
   } else {
     console.warn('[Server] WOOCOMMERCE_URL no definida — sync de productos desactivada');
   }
