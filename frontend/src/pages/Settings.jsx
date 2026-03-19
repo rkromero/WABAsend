@@ -44,7 +44,7 @@ export default function Settings() {
   useEffect(() => {
     api.get('/config')
       .then((r) => {
-        setCurrent(r.data);
+        setCurrent(r?.data || {});
         setLoading(false);
       })
       .catch((err) => {
