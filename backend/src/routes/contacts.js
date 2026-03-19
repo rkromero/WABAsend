@@ -96,11 +96,13 @@ router.post('/bulk', async (req, res) => {
 
       if (!nombre) {
         errors.push({ telefono, error: 'Nombre vacío' });
+        skipped++;
         continue;
       }
 
       if (telefono.length < 10 || telefono.length > 15) {
-        errors.push({ nombre, telefono, error: 'Teléfono inválido (debe tener 10-15 dígitos)' });
+        errors.push({ nombre, telefono: telefono || '(vacío)', error: `Teléfono inválido: "${telefono}" (${telefono.length} dígitos, se esperan 10-15)` });
+        skipped++;
         continue;
       }
 

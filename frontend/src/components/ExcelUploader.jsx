@@ -12,6 +12,7 @@ import api from '../lib/api.js';
 export default function ExcelUploader({ onImported }) {
   const [isDragging, setIsDragging] = useState(false);
   const [preview, setPreview]       = useState(null); // { contacts, errors }
+  const [result, setResult]         = useState(null); // resultado del import
   const [loading, setLoading]       = useState(false);
   const inputRef = useRef(null);
 
@@ -67,13 +68,17 @@ export default function ExcelUploader({ onImported }) {
     if (!preview?.contacts?.length) return;
     setLoading(true);
     try {
-      const result = await api.post('/contacts/bulk', { contacts: preview.contacts });
-      toast.success(`${result.data.imported} contactos importados`);
-      if (result.data.skipped > 0) {
-        toast(`${result.data.skipped} filas omitidas`, { icon: '⚠️' });
-      }
+      const res = await api.post('/contacts/bulk', { contacts: preview.contacts });
+      const { imported, skipped, errors: backendErrors } = res.data;
       setPreview(null);
-      onImported?.();
+      if (skipped === 0 && (!backendErrors || backendErrors.length === 0)) {
+        toast.success(`${imported} contactos importados correctamente`);
+        onImported?.();
+      } else {
+        // Mostrar resultado detallado con errores
+        setResult({ imported, skipped, errors: backendErrors || [] });
+        if (imported > 0) onImported?.();
+      }
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -81,10 +86,59 @@ export default function ExcelUploader({ onImported }) {
     }
   }
 
+  function resetAll() {
+    setPreview(null);
+    setResult(null);
+  }
+
   return (
     <div className="space-y-4">
+
+      {/* Panel de resultado post-import con errores detallados */}
+      {result && (
+        <div className="glass-card overflow-hidden animate-fade-in">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-base-border">
+            <p className="text-sm font-medium text-white">Resultado de la importación</p>
+            <button onClick={resetAll} className="text-gray-500 hover:text-gray-300">
+              <X size={16} />
+            </button>
+          </div>
+          <div className="p-4 space-y-3">
+            <div className="flex gap-4">
+              <div className="flex items-center gap-2 text-sm">
+                <CheckCircle2 size={15} className="text-green-400" />
+                <span className="text-gray-300">{result.imported} importados</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <AlertCircle size={15} className="text-red-400" />
+                <span className="text-gray-300">{result.skipped} con error de base de datos</span>
+              </div>
+            </div>
+
+            {result.errors.length > 0 && (
+              <div className="p-3 bg-red-500/8 border border-red-500/20 rounded-lg">
+                <p className="text-xs font-medium text-red-400 mb-2">
+                  Detalle de errores:
+                </p>
+                <ul className="space-y-1">
+                  {result.errors.map((e, i) => (
+                    <li key={i} className="text-xs text-red-400/80 font-mono">
+                      {e.nombre || '—'} / {e.telefono || '—'}: {e.error}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <button onClick={resetAll} className="btn-secondary text-xs">
+              Importar otro archivo
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Drop zone */}
-      {!preview && (
+      {!preview && !result && (
         <div
           onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
           onDragLeave={() => setIsDragging(false)}
