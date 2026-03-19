@@ -17,7 +17,7 @@ export default function App() {
   return (
     <div className="flex h-screen overflow-hidden bg-base font-body">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto">
+      <main className={`flex-1 ${isInbox ? 'overflow-hidden flex flex-col' : 'overflow-y-auto'}`}>
         {isInbox ? (
           <Routes>
             <Route path="/inbox" element={<Inbox />} />

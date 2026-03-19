@@ -265,7 +265,7 @@ export default function Inbox() {
 
   return (
     // El inbox ocupa toda la pantalla restante — sobreescribe el padding del layout
-    <div className="-m-6 lg:-m-8 h-screen flex animate-fade-in overflow-hidden">
+    <div className="h-full flex animate-fade-in overflow-hidden">
 
       {/* ─── Sidebar izquierdo: lista de conversaciones ─────────────────── */}
       <div className="w-[320px] shrink-0 flex flex-col border-r border-base-border bg-base-surface">
