@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Users, Send, CheckCircle, Clock, AlertTriangle,
-  MessageSquare, Eye, Truck, XCircle, ArrowRight, Zap,
-  TrendingUp, ShoppingBag,
+  Users, Send, CheckCircle,
+  Eye, Truck, XCircle, ArrowRight, Zap,
+  TrendingUp, ShoppingBag, RefreshCw,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import api from '../lib/api.js';
 import StatusBadge from '../components/StatusBadge.jsx';
 import ProgressBar from '../components/ProgressBar.jsx';
@@ -52,10 +53,11 @@ function MiniScore({ label, value, color = 'text-gray-400' }) {
 }
 
 export default function Dashboard() {
-  const [stats, setStats]         = useState(null);
-  const [contacts, setContacts]   = useState(0);
-  const [campaigns, setCampaigns] = useState([]);
-  const [loading, setLoading]     = useState(true);
+  const [stats, setStats]               = useState(null);
+  const [contacts, setContacts]         = useState(0);
+  const [campaigns, setCampaigns]       = useState([]);
+  const [loading, setLoading]           = useState(true);
+  const [checkingConversions, setCheckingConversions] = useState(false);
 
   async function fetchData() {
     try {
@@ -71,6 +73,24 @@ export default function Dashboard() {
       // Silencioso en polling
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleCheckConversions() {
+    setCheckingConversions(true);
+    try {
+      const res = await api.post('/campaigns/check-all-conversions?days=30');
+      const { campaigns_checked, total_new_conversions } = res.data;
+      if (total_new_conversions > 0) {
+        toast.success(`${total_new_conversions} conversión(es) nueva(s) detectadas en ${campaigns_checked} campaña(s)`);
+      } else {
+        toast.success(`Verificación completa — sin nuevas conversiones en ${campaigns_checked} campaña(s)`);
+      }
+      await fetchData(); // refrescar stats
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Error al verificar conversiones');
+    } finally {
+      setCheckingConversions(false);
     }
   }
 
@@ -133,9 +153,20 @@ export default function Dashboard() {
 
       {/* KPI — Conversiones */}
       <div>
-        <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">
-          Conversiones
-        </h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+            Conversiones
+          </h2>
+          <button
+            onClick={handleCheckConversions}
+            disabled={checkingConversions}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-all disabled:opacity-50"
+            title="Verifica todas las campañas recientes contra WooCommerce ahora. El sistema también lo hace automáticamente cada noche a las 3 AM."
+          >
+            <RefreshCw size={12} className={checkingConversions ? 'animate-spin' : ''} />
+            {checkingConversions ? 'Verificando...' : 'Verificar ahora'}
+          </button>
+        </div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
           {/* Tasa de conversión global */}

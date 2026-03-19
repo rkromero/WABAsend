@@ -14,6 +14,7 @@ import cron from 'node-cron';
 import { initSchema } from './db/index.js';
 import { startScheduler } from './services/scheduler.js';
 import { syncProducts } from './services/woocommerce.js';
+import { checkAllCampaignsConversions } from './services/conversions.js';
 
 import configRouter from './routes/config.js';
 import templatesRouter from './routes/templates.js';
@@ -113,7 +114,6 @@ async function start() {
     );
 
     // Sync diaria a las 2:00 AM Argentina (UTC-3 = 05:00 UTC)
-    // Cron: minuto 0, hora 5, cualquier día
     cron.schedule('0 5 * * *', () => {
       console.log('[Server] Sync diaria WooCommerce (2 AM Argentina)');
       syncProducts().catch((err) =>
@@ -121,7 +121,17 @@ async function start() {
       );
     });
 
-    console.log('[Server] Sync WooCommerce activada — diaria a las 2:00 AM (Argentina)');
+    // Verificación de conversiones a las 3:00 AM Argentina (UTC-3 = 06:00 UTC)
+    // Corre DESPUÉS de la sync de productos para tener datos frescos
+    cron.schedule('0 6 * * *', () => {
+      console.log('[Server] Verificación nocturna de conversiones (3 AM Argentina)');
+      checkAllCampaignsConversions().catch((err) =>
+        console.error('[Server] Error en verificación de conversiones:', err.message)
+      );
+    });
+
+    console.log('[Server] Sync WooCommerce activada — 2 AM (Argentina)');
+    console.log('[Server] Verificación de conversiones activada — 3 AM (Argentina)');
   } else {
     console.warn('[Server] WOOCOMMERCE_URL no definida — sync de productos desactivada');
   }
