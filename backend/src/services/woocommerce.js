@@ -158,7 +158,7 @@ async function fetchVariations(productId) {
     });
 
     const variations = response.data || [];
-    if (variations.length === 0) return { stockTotal: 0, variantes: '' };
+    if (variations.length === 0) return { stockTotal: 0, variantes: '', imagenFallback: null };
 
     // Sumar stock de todas las variantes disponibles
     const stockTotal = variations.reduce((sum, v) => {
@@ -175,10 +175,14 @@ async function fetchVariations(productId) {
     // Eliminar duplicados y ordenar
     const unicos = [...new Set(valores)].join(', ');
 
-    return { stockTotal, variantes: unicos };
+    // Si alguna variante tiene imagen propia, la usamos como fallback para el padre
+    // (algunos productos en WooCommerce tienen imágenes solo en las variantes)
+    const imagenFallback = variations.find((v) => v.image?.src)?.image?.src || null;
+
+    return { stockTotal, variantes: unicos, imagenFallback };
   } catch (err) {
     console.warn(`[WooCommerce] No se pudieron obtener variantes del producto ${productId}: ${err.message}`);
-    return { stockTotal: 1, variantes: '' }; // fallback: asumir que tiene stock
+    return { stockTotal: 1, variantes: '', imagenFallback: null };
   }
 }
 
@@ -313,8 +317,12 @@ export async function syncProducts(forceFullSync = false) {
     const precio       = parseFloat(woo.price) || 0;
     const precioOferta = woo.sale_price ? parseFloat(woo.sale_price) : null;
     const categorias   = (woo.categories || []).map((c) => c.name).join(', ');
-    const imagenUrl    = woo.images?.[0]?.src || null;
     const permalink    = woo.permalink || null;
+
+    // Imagen: intentar múltiples fuentes en orden de preferencia
+    // woo.images  → array de imágenes del producto padre (galería)
+    // woo.image   → imagen singular (usada en variantes de WooCommerce)
+    let imagenUrl = woo.images?.[0]?.src || woo.image?.src || null;
 
     // Limpiar HTML de ambas descripciones y combinarlas para dar contexto a Vision.
     // La descripción larga suele tener tablas de talles, materiales, guía de cuidado, etc.
@@ -326,13 +334,19 @@ export async function syncProducts(forceFullSync = false) {
     // Productos "variable" (con talles/colores) guardan el stock en cada variante,
     // no en el producto padre. stock_quantity del padre suele ser null o 0.
     // Hay que consultar las variantes para obtener el stock real y los talles disponibles.
-    let stock    = 0;
+    let stock     = 0;
     let variantes = '';
 
     if (woo.type === 'variable') {
       const varData = await fetchVariations(woo.id);
-      stock    = varData.stockTotal;
+      stock     = varData.stockTotal;
       variantes = varData.variantes;
+
+      // Si el producto padre no tiene imagen, usar la primera imagen de sus variantes
+      if (!imagenUrl && varData.imagenFallback) {
+        imagenUrl = varData.imagenFallback;
+        console.log(`[WooCommerce] Imagen de variante usada como fallback para "${nombre}"`);
+      }
     } else {
       // Producto simple: el stock está directamente en el padre
       stock = woo.stock_quantity ?? (woo.stock_status === 'instock' ? 1 : 0);
