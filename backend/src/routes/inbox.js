@@ -23,8 +23,11 @@ router.get('/conversations', async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page) || 1);
 
   try {
-    const data = await getConversations(page);
-    res.json({ success: true, data });
+    const raw = await getConversations(page);
+    // Chatwoot devuelve { data: { meta: {...}, payload: [...] } }
+    // Normalizamos para que el frontend reciba { payload: [...], meta: {...} }
+    const normalized = raw?.data || raw;
+    res.json({ success: true, data: normalized });
   } catch (err) {
     console.error('[Inbox] GET conversations error:', err.response?.data || err.message);
     res.status(500).json({ success: false, error: err.message });
@@ -39,8 +42,10 @@ router.get('/conversations/:id/messages', async (req, res) => {
   }
 
   try {
-    const data = await getMessages(conversationId);
-    res.json({ success: true, data });
+    const raw = await getMessages(conversationId);
+    // Chatwoot devuelve { payload: [...messages...] }
+    const normalized = raw?.payload ? raw : { payload: raw };
+    res.json({ success: true, data: normalized });
   } catch (err) {
     console.error('[Inbox] GET messages error:', err.response?.data || err.message);
     res.status(500).json({ success: false, error: err.message });
