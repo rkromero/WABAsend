@@ -18,6 +18,8 @@ import templatesRouter from './routes/templates.js';
 import contactsRouter from './routes/contacts.js';
 import campaignsRouter from './routes/campaigns.js';
 import webhookRouter from './routes/webhook.js';
+import inboxRouter from './routes/inbox.js';
+import chatwootWebhookRouter from './routes/chatwootWebhook.js';
 
 dotenv.config();
 
@@ -73,6 +75,8 @@ app.use('/api/config', configRouter);
 app.use('/api/templates', templatesRouter);
 app.use('/api/contacts', contactsRouter);
 app.use('/api/campaigns', campaignsRouter);
+app.use('/api/inbox', inboxRouter);
+app.use('/api/chatwoot', chatwootWebhookRouter);
 app.use('/webhook', webhookRouter);
 
 // --- Manejo global de errores ---
