@@ -477,12 +477,6 @@ function NewTemplateForm({ onSuccess, onCancel }) {
             {/* Burbuja del mensaje */}
             <div className="max-w-[240px] ml-auto">
               <div className="bg-[#202c33] rounded-tl-2xl rounded-tr-sm rounded-b-2xl p-3 shadow-md">
-                {/* Header si hay */}
-                {form.useFooter === false && form.bodyText && (
-                  <p className="text-[#e9edef] text-sm whitespace-pre-wrap leading-relaxed">
-                    {previewText || 'El texto de tu mensaje aparecerá aquí…'}
-                  </p>
-                )}
                 {form.bodyText ? (
                   <p className="text-[#e9edef] text-sm whitespace-pre-wrap leading-relaxed">
                     {previewText}
