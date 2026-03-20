@@ -191,6 +191,25 @@ export default function Inbox() {
     }
   }, [loadingConvs]);
 
+  // ── Marcar conversación como leída ────────────────────────────────────────
+
+  /**
+   * Al abrir una conversación:
+   * 1. Actualización optimista: borra el badge en el estado local inmediatamente.
+   * 2. Llama al backend en background para avisar a Chatwoot (no bloqueante).
+   */
+  function openConversation(convId) {
+    setActiveConvId(convId);
+
+    // Optimistic update: zerear unread_count para que el badge desaparezca al instante
+    setConversations((prev) =>
+      prev.map((c) => c.id === convId ? { ...c, unread_count: 0 } : c)
+    );
+
+    // Avisar a Chatwoot en background — si falla no importa, el polling lo corregirá
+    api.post(`/inbox/conversations/${convId}/read`).catch(() => {});
+  }
+
   usePolling(fetchConversations, 4000, true);
   useEffect(() => { fetchConversations(); }, []); // eslint-disable-line
 
@@ -349,7 +368,7 @@ export default function Inbox() {
                 key={conv.id}
                 conversation={conv}
                 isActive={conv.id === activeConvId}
-                onClick={() => setActiveConvId(conv.id)}
+                onClick={() => openConversation(conv.id)}
               />
             ))
           )}

@@ -9,7 +9,7 @@
  */
 
 import { Router } from 'express';
-import { getConversations, getMessages, sendMessageToConversation, getConversation } from '../services/chatwoot.js';
+import { getConversations, getMessages, sendMessageToConversation, getConversation, markConversationAsRead } from '../services/chatwoot.js';
 import { getConfig } from '../services/whatsapp.js';
 import { query } from '../db/index.js';
 import axios from 'axios';
@@ -124,6 +124,24 @@ router.post('/conversations/:id/messages', async (req, res) => {
   } catch (err) {
     console.error('[Inbox] POST message error:', err.response?.data || err.message);
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/inbox/conversations/:id/read — marcar conversación como leída
+// Resetea unread_count a 0 en Chatwoot para que desaparezca el badge
+router.post('/conversations/:id/read', async (req, res) => {
+  const conversationId = parseInt(req.params.id);
+  if (isNaN(conversationId)) {
+    return res.status(400).json({ success: false, error: 'ID de conversación inválido' });
+  }
+
+  try {
+    await markConversationAsRead(conversationId);
+    res.json({ success: true });
+  } catch (err) {
+    // Aunque falle, devolvemos 200 — el frontend no debe bloquear por esto
+    console.error('[Inbox] read error:', err.message);
+    res.json({ success: false, error: err.message });
   }
 });
 

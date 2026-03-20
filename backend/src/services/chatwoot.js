@@ -186,3 +186,22 @@ export async function getConversation(conversationId) {
     throw err;
   }
 }
+
+/**
+ * Marca una conversación como leída por el agente.
+ * Resetea el unread_count a 0 en Chatwoot.
+ *
+ * Chatwoot endpoint: POST /conversations/:id/update_last_seen
+ *
+ * @param {number} conversationId - ID de la conversación
+ * @returns {Promise<void>}
+ */
+export async function markConversationAsRead(conversationId) {
+  try {
+    await chatwootClient.post(`/conversations/${conversationId}/update_last_seen`);
+    console.debug(`[Chatwoot] Conversación ${conversationId} marcada como leída`);
+  } catch (err) {
+    // No es un error crítico — logueamos pero no lanzamos
+    console.warn('[Chatwoot] Error al marcar como leída:', err.response?.data || err.message);
+  }
+}
