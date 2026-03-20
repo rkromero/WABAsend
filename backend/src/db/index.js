@@ -177,7 +177,7 @@ export async function initSchema() {
     console.warn('[DB] variantes migration warning:', err.message.split('\n')[0]);
   }
 
-  // 4. Índices de performance
+  // 4. Índices originales de performance
   try {
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_waba_message_logs_campaign_id
@@ -195,6 +195,142 @@ export async function initSchema() {
     `);
   } catch (err) {
     console.warn('[DB] Index warning:', err.message.split('\n')[0]);
+  }
+
+  // 5. Índices de performance adicionales (2026-03-20)
+  //    Cada índice corre por separado para que un fallo no bloquee al resto.
+
+  // Scheduler: query que corre cada minuto — necesita index compuesto
+  try {
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_waba_campaigns_status_scheduled
+        ON waba_campaigns(status, scheduled_at)
+    `);
+    console.debug('[DB] idx_waba_campaigns_status_scheduled OK');
+  } catch (err) {
+    console.warn('[DB] idx_waba_campaigns_status_scheduled:', err.message.split('\n')[0]);
+  }
+
+  // Dashboard stats: campaigns por status
+  try {
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_waba_campaigns_status
+        ON waba_campaigns(status)
+    `);
+    console.debug('[DB] idx_waba_campaigns_status OK');
+  } catch (err) {
+    console.warn('[DB] idx_waba_campaigns_status:', err.message.split('\n')[0]);
+  }
+
+  // Conversiones: JOIN por campaign_id en listado de campañas
+  try {
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_waba_conversions_campaign_id
+        ON waba_conversions(campaign_id)
+    `);
+    console.debug('[DB] idx_waba_conversions_campaign_id OK');
+  } catch (err) {
+    console.warn('[DB] idx_waba_conversions_campaign_id:', err.message.split('\n')[0]);
+  }
+
+  // Conversiones: JOIN por email en stats del dashboard
+  try {
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_waba_conversions_email
+        ON waba_conversions(email)
+    `);
+    console.debug('[DB] idx_waba_conversions_email OK');
+  } catch (err) {
+    console.warn('[DB] idx_waba_conversions_email:', err.message.split('\n')[0]);
+  }
+
+  // Message logs: email para JOIN de conversiones — partial index (excluye NULLs)
+  try {
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_waba_message_logs_email
+        ON waba_message_logs(email)
+        WHERE email IS NOT NULL
+    `);
+    console.debug('[DB] idx_waba_message_logs_email OK');
+  } catch (err) {
+    console.warn('[DB] idx_waba_message_logs_email:', err.message.split('\n')[0]);
+  }
+
+  // Message logs: compound index para el scheduler (campaign_id + status)
+  try {
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_waba_message_logs_campaign_status
+        ON waba_message_logs(campaign_id, status)
+    `);
+    console.debug('[DB] idx_waba_message_logs_campaign_status OK');
+  } catch (err) {
+    console.warn('[DB] idx_waba_message_logs_campaign_status:', err.message.split('\n')[0]);
+  }
+
+  // Contacts: segmento para el filtro de la bandeja y campañas — partial index
+  try {
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_waba_contacts_segmento
+        ON waba_contacts(segmento)
+        WHERE segmento IS NOT NULL
+    `);
+    console.debug('[DB] idx_waba_contacts_segmento OK');
+  } catch (err) {
+    console.warn('[DB] idx_waba_contacts_segmento:', err.message.split('\n')[0]);
+  }
+
+  // Contacts: email para búsquedas y conversiones — partial index
+  try {
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_waba_contacts_email
+        ON waba_contacts(email)
+        WHERE email IS NOT NULL
+    `);
+    console.debug('[DB] idx_waba_contacts_email OK');
+  } catch (err) {
+    console.warn('[DB] idx_waba_contacts_email:', err.message.split('\n')[0]);
+  }
+
+  // Products: updated_at para ORDER BY DESC de paginación
+  try {
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_waba_products_updated_at
+        ON waba_products(updated_at DESC)
+    `);
+    console.debug('[DB] idx_waba_products_updated_at OK');
+  } catch (err) {
+    console.warn('[DB] idx_waba_products_updated_at:', err.message.split('\n')[0]);
+  }
+
+  // Incoming messages: created_at para el historial del bot (ORDER BY DESC LIMIT 10)
+  try {
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_incoming_messages_telefono_created
+        ON incoming_messages(telefono, created_at DESC)
+    `);
+    console.debug('[DB] idx_incoming_messages_telefono_created OK');
+  } catch (err) {
+    console.warn('[DB] idx_incoming_messages_telefono_created:', err.message.split('\n')[0]);
+  }
+
+  // Búsqueda con ILIKE '%texto%': requiere extensión pg_trgm + índices GIN.
+  // Si Railway no permite CREATE EXTENSION (permisos), este bloque falla silenciosamente
+  // y las búsquedas siguen funcionando (solo sin aceleración trigrama).
+  try {
+    await pool.query(`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_waba_contacts_nombre_trgm
+        ON waba_contacts USING gin(nombre gin_trgm_ops);
+      CREATE INDEX IF NOT EXISTS idx_waba_contacts_telefono_trgm
+        ON waba_contacts USING gin(telefono gin_trgm_ops);
+      CREATE INDEX IF NOT EXISTS idx_waba_products_nombre_trgm
+        ON waba_products USING gin(nombre gin_trgm_ops);
+    `);
+    console.debug('[DB] Índices trigrama (pg_trgm) OK');
+  } catch (err) {
+    // No es crítico: las búsquedas funcionan igual, solo son más lentas sin este índice
+    console.warn('[DB] pg_trgm (no crítico):', err.message.split('\n')[0]);
   }
 
   console.log('[DB] Esquema inicializado correctamente');
