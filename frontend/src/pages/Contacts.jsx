@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, Search, Trash2, Upload, ChevronLeft, ChevronRight, Tag, Edit2, Check, X } from 'lucide-react';
+import { Users, Search, Trash2, Upload, ChevronLeft, ChevronRight, Tag, Edit2, Check, X, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -110,6 +110,11 @@ export default function Contacts() {
     } finally {
       setSavingPhone(false);
     }
+  }
+
+  // Teléfono válido para WhatsApp: 549 + 10 dígitos (ej: 5491134866718)
+  function isPhoneValid(tel) {
+    return /^549\d{10}$/.test(tel);
   }
 
   function segmentColor(seg) {
@@ -265,10 +270,19 @@ export default function Contacts() {
                         </div>
                       ) : (
                         <div className="flex items-center gap-1.5 group/phone">
-                          <span className="text-gray-400 font-mono text-xs">{c.telefono}</span>
+                          <span className={`font-mono text-xs ${isPhoneValid(c.telefono) ? 'text-gray-400' : 'text-orange-400'}`}>
+                            {c.telefono}
+                          </span>
+                          {!isPhoneValid(c.telefono) && (
+                            <AlertTriangle
+                              size={11}
+                              className="text-orange-400 shrink-0"
+                              title="Teléfono no normalizado — puede fallar al enviar por WhatsApp"
+                            />
+                          )}
                           <button
                             onClick={() => startEditPhone(c)}
-                            className="opacity-0 group-hover/phone:opacity-100 transition-opacity text-gray-600 hover:text-gray-300"
+                            className="opacity-0 group-hover/phone:opacity-100 transition-opacity text-gray-600 hover:text-gray-300 ml-0.5"
                             title="Editar teléfono"
                           >
                             <Edit2 size={11} />
