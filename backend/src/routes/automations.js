@@ -128,12 +128,53 @@ router.get('/queue', async (req, res) => {
       `SELECT q.*, a.nombre AS automation_nombre, a.evento, a.template_name
        FROM waba_automation_queue q
        JOIN waba_automations a ON a.id = q.automation_id
-       ORDER BY q.created_at DESC
+       ORDER BY
+         CASE WHEN q.status = 'invalid_phone' THEN 0 ELSE 1 END,
+         q.created_at DESC
        LIMIT $1`,
       [limit]
     );
     res.json({ success: true, data: result.rows });
   } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /api/automations/queue/:id — corregir teléfono de una entrada invalid_phone
+// Al guardar el teléfono corregido, vuelve a status='pending' para que se envíe
+router.put('/queue/:id', async (req, res) => {
+  const { telefono } = req.body;
+
+  if (!telefono || typeof telefono !== 'string') {
+    return res.status(400).json({ success: false, error: 'telefono es requerido' });
+  }
+
+  // Validar que tenga formato correcto para WhatsApp (solo dígitos, 10-15 chars)
+  const telLimpio = telefono.replace(/[\s\-\(\)\+]/g, '');
+  if (!/^\d{10,15}$/.test(telLimpio)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Formato inválido. Ingresá el número completo (ej: 5491134866718)',
+    });
+  }
+
+  try {
+    const result = await query(
+      `UPDATE waba_automation_queue
+       SET telefono = $1, status = 'pending', error_message = NULL
+       WHERE id = $2
+       RETURNING *`,
+      [telLimpio, req.params.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Entrada no encontrada' });
+    }
+
+    console.log(`[Automations] Teléfono corregido para queue #${req.params.id}: ${telLimpio}`);
+    res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('[Automations] PUT queue error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });

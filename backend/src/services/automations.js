@@ -8,6 +8,7 @@
  *   1. WooCommerce dispara un webhook (ej: order.completed)
  *   2. processWooEvent() busca automatizaciones activas para ese evento
  *   3. Encola un mensaje en waba_automation_queue con scheduled_for = ahora + N días
+ *      Si el teléfono no se puede normalizar → status = 'invalid_phone' para corrección manual
  *   4. processAutomationQueue() (llamado por el scheduler) envía los que ya vencieron
  */
 
@@ -18,44 +19,67 @@ import { sendTemplateMessage, sleep } from './whatsapp.js';
  * Normaliza un número de teléfono argentino al formato internacional 549XXXXXXXXXX
  * que requiere la API de WhatsApp Business.
  *
- * Ejemplos de entrada: "1123456789", "01123456789", "+5491123456789", "5491123456789"
+ * Cubre los formatos más comunes en WooCommerce Argentina:
+ *   - Con formato correcto:      +5491134866718, 5491134866718
+ *   - Sin prefijo país:          1134866718, 01134866718
+ *   - Con prefijo 15 viejo CABA: 1115XXXXXXX, 011-15-XXXXXXX
+ *   - Con prefijo 15 área 3dig:  221155703442, 0221-15-5703442
+ *   - Con prefijo 15 área 4dig:  354115XXXXXX
  *
  * @param {string} raw - Número crudo del campo billing.phone de WooCommerce
- * @returns {string|null} - Número normalizado o null si no se puede procesar
+ * @returns {string|null} - Número normalizado o null si no se puede procesar con certeza
  */
 export function normalizarTelefono(raw) {
   if (!raw || typeof raw !== 'string') return null;
 
-  // Limpiar espacios, guiones, paréntesis y el signo +
-  let tel = raw.replace(/[\s\-\(\)\+]/g, '');
+  // Limpiar todo excepto dígitos
+  let tel = raw.replace(/[\s\-\(\)\+\.]/g, '');
 
-  // Ya tiene formato completo con prefijo 9 de celular argentino: 549XXXXXXXXXX
+  if (!tel) return null;
+
+  // Ya tiene formato completo correcto: 549 + 10 dígitos
   if (/^549\d{10}$/.test(tel)) return tel;
 
-  // Tiene 54 pero sin 9: 54XXXXXXXXXX → agregar 9
+  // Tiene 54 pero sin el 9 de celular: 5411XXXXXXXX → 54911XXXXXXXX
   if (/^54\d{10}$/.test(tel)) return `549${tel.slice(2)}`;
 
-  // Tiene 0 adelante (formato local: 011...): quitar el 0
+  // Tiene 0 adelante (formato local argentino: 011..., 0221...)
   if (tel.startsWith('0')) tel = tel.slice(1);
 
-  // 10 dígitos (ej: 1123456789) — número de celular argentino sin prefijo país
+  // ── Detección del prefijo "15" (formato celular viejo) ──
+  // En Argentina: 0[área][15][número] → 549[área][número]
+
+  // 12 dígitos: área 3 dígitos + 15 + 7 dígitos  (ej: 221-15-5703442)
+  if (tel.length === 12 && tel.slice(3, 5) === '15') {
+    return `549${tel.slice(0, 3)}${tel.slice(5)}`;
+  }
+
+  // 11 dígitos con área 11 (CABA/GBA): 11 + 15 + 7 dígitos
+  if (tel.length === 11 && tel.startsWith('11') && tel.slice(2, 4) === '15') {
+    return `549${tel.slice(0, 2)}${tel.slice(4)}`;
+  }
+
+  // 12 dígitos: área 4 dígitos + 15 + 6 dígitos  (ciudades pequeñas)
+  if (tel.length === 12 && tel.slice(4, 6) === '15') {
+    return `549${tel.slice(0, 4)}${tel.slice(6)}`;
+  }
+
+  // 10 dígitos limpios (área + número sin prefijo 15): agregar 549
   if (/^\d{10}$/.test(tel)) return `549${tel}`;
 
-  // 8 o 9 dígitos (interior del país sin el 15)
-  if (/^\d{8,9}$/.test(tel)) return `549${tel}`;
-
+  // No se pudo normalizar con certeza
   return null;
 }
 
 /**
  * Procesa un evento de WooCommerce y encola mensajes para automatizaciones activas.
- * Usa UNIQUE constraint en (automation_id, woo_order_id) para evitar duplicados.
+ * Si el teléfono no se puede normalizar, lo guarda con status='invalid_phone'
+ * para que el usuario pueda corregirlo manualmente desde la UI.
  *
  * @param {string} evento - Tipo de evento: 'order.completed', 'order.created', 'customer.created'
  * @param {Object} data   - Payload del webhook de WooCommerce
  */
 export async function processWooEvent(evento, data) {
-  // Buscar automatizaciones activas para este evento
   const automationResult = await query(
     `SELECT * FROM waba_automations WHERE evento = $1 AND activa = true`,
     [evento]
@@ -66,7 +90,6 @@ export async function processWooEvent(evento, data) {
     return;
   }
 
-  // Extraer datos del cliente del payload de WooCommerce
   const billing    = data.billing || {};
   const rawPhone   = billing.phone || data.phone || '';
   const telefono   = normalizarTelefono(rawPhone);
@@ -74,34 +97,36 @@ export async function processWooEvent(evento, data) {
   const email      = billing.email || data.email || null;
   const wooOrderId = data.id ? String(data.id) : null;
 
+  const telefonoFinal = telefono || rawPhone || 'sin_telefono';
+  const statusInicial = telefono ? 'pending' : 'invalid_phone';
+
   if (!telefono) {
     console.warn(
-      `[Automations] Evento ${evento} sin teléfono válido (raw: "${rawPhone}"). Order ID: ${wooOrderId}`
+      `[Automations] Teléfono no normalizable (raw: "${rawPhone}") — guardando como invalid_phone. ` +
+      `Cliente: ${nombre}, Order: ${wooOrderId}`
     );
-    return;
+  } else {
+    console.log(
+      `[Automations] Evento "${evento}" — ${nombre} (${telefono}), ` +
+      `${automationResult.rows.length} automatización(es)`
+    );
   }
 
-  console.log(
-    `[Automations] Procesando evento "${evento}" — cliente: ${nombre} (${telefono}), ` +
-    `${automationResult.rows.length} automatización(es) activa(s)`
-  );
-
   for (const automation of automationResult.rows) {
-    // scheduled_for = ahora + N días
     const scheduledFor = new Date(Date.now() + automation.delay_dias * 24 * 60 * 60 * 1000);
 
     try {
       await query(
         `INSERT INTO waba_automation_queue
            (automation_id, telefono, nombre_cliente, email, woo_order_id, scheduled_for, status)
-         VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (automation_id, woo_order_id) DO NOTHING`,
-        [automation.id, telefono, nombre, email, wooOrderId, scheduledFor]
+        [automation.id, telefonoFinal, nombre, email, wooOrderId, scheduledFor, statusInicial]
       );
 
       console.log(
-        `[Automations] ✓ Encolado: automation #${automation.id} "${automation.nombre}" ` +
-        `para ${telefono} — programado: ${scheduledFor.toISOString()}`
+        `[Automations] ✓ Encolado (${statusInicial}): automation #${automation.id} ` +
+        `"${automation.nombre}" para ${telefonoFinal}`
       );
     } catch (err) {
       console.error(`[Automations] Error al encolar automation #${automation.id}:`, err.message);
@@ -111,10 +136,8 @@ export async function processWooEvent(evento, data) {
 
 /**
  * Procesa la cola de automatizaciones pendientes.
- * Envía los mensajes cuyo scheduled_for ya pasó.
- * Llamar periódicamente desde el scheduler (cada minuto).
- *
- * Toma hasta 50 mensajes por ciclo para no sobrecargar la API de Meta.
+ * Solo procesa entradas con status='pending' cuyo scheduled_for ya pasó.
+ * Las entradas 'invalid_phone' se ignoran hasta que el usuario las corrija.
  */
 export async function processAutomationQueue() {
   const pendingResult = await query(
@@ -146,9 +169,7 @@ export async function processAutomationQueue() {
         [messageId, item.id]
       );
 
-      console.log(
-        `[Automations] ✓ Enviado "${item.automation_nombre}" → ${item.telefono} (msgId: ${messageId})`
-      );
+      console.log(`[Automations] ✓ Enviado "${item.automation_nombre}" → ${item.telefono}`);
     } catch (err) {
       const errorMsg = err.response?.data?.error?.message || err.message;
 
@@ -162,7 +183,6 @@ export async function processAutomationQueue() {
       console.error(`[Automations] ✗ Falló envío a ${item.telefono}: ${errorMsg}`);
     }
 
-    // Rate limiting: 1 segundo entre mensajes para respetar límites de Meta
     await sleep(1000);
   }
 }

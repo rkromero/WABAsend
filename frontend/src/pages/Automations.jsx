@@ -1,53 +1,154 @@
 import React, { useState, useEffect } from 'react';
 import {
   Zap, Plus, Trash2, ToggleLeft, ToggleRight, RefreshCw,
-  Clock, CheckCircle, XCircle, AlertCircle, Copy,
+  Clock, CheckCircle, XCircle, AlertCircle, Copy, Phone, Check, Edit2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../lib/api.js';
 
 const EVENTOS = [
-  { value: 'order.completed',  label: 'Pedido completado',      desc: 'Cuando un pedido pasa a estado "Completado"' },
-  { value: 'order.created',    label: 'Pedido nuevo',           desc: 'Cuando se crea cualquier pedido nuevo' },
-  { value: 'customer.created', label: 'Cliente nuevo',          desc: 'Cuando un cliente se registra por primera vez' },
+  { value: 'order.completed',  label: 'Pedido completado',  desc: 'Cuando un pedido pasa a estado "Completado"' },
+  { value: 'order.created',    label: 'Pedido nuevo',        desc: 'Cuando se crea cualquier pedido nuevo' },
+  { value: 'customer.created', label: 'Cliente nuevo',       desc: 'Cuando un cliente se registra por primera vez' },
 ];
 
 const STATUS_COLORS = {
-  pending: 'text-yellow-400 bg-yellow-400/10',
-  sent:    'text-green-400  bg-green-400/10',
-  failed:  'text-red-400    bg-red-400/10',
+  pending:       'text-yellow-400 bg-yellow-400/10',
+  sent:          'text-green-400  bg-green-400/10',
+  failed:        'text-red-400    bg-red-400/10',
+  invalid_phone: 'text-orange-400 bg-orange-400/10',
 };
 
-function EventoBadge({ evento }) {
-  const found = EVENTOS.find((e) => e.value === evento);
+// ── Fila de teléfono inválido con edición inline ──────────────────────────
+function InvalidPhoneRow({ item, onFixed }) {
+  const [editing, setEditing] = useState(false);
+  const [tel, setTel]         = useState('');
+  const [saving, setSaving]   = useState(false);
+
+  function startEdit() {
+    setTel(item.telefono === 'sin_telefono' ? '' : item.telefono);
+    setEditing(true);
+  }
+
+  async function handleSave() {
+    const limpio = tel.replace(/[\s\-\(\)\+]/g, '');
+    if (!/^\d{10,15}$/.test(limpio)) {
+      toast.error('Ingresá el número completo sin espacios (ej: 5491134866718)');
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.put(`/automations/queue/${item.id}`, { telefono: limpio });
+      toast.success('Teléfono actualizado — se enviará en el próximo ciclo');
+      setEditing(false);
+      onFixed();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent font-medium">
-      {found?.label || evento}
-    </span>
+    <div className="px-4 py-3 bg-orange-400/5 border-l-2 border-orange-400/50">
+      <div className="flex items-start gap-3">
+        <Phone size={14} className="text-orange-400 mt-0.5 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-gray-200">
+            {item.nombre_cliente || '—'}
+            <span className="text-[10px] text-orange-400 ml-2 bg-orange-400/10 px-2 py-0.5 rounded-full">
+              teléfono inválido
+            </span>
+          </p>
+          <p className="text-[10px] text-gray-600 mt-0.5">
+            {item.automation_nombre} · Recibido: <span className="text-orange-400/70">{item.telefono}</span>
+            {item.email && ` · ${item.email}`}
+          </p>
+
+          {editing ? (
+            <div className="flex items-center gap-2 mt-2">
+              <input
+                autoFocus
+                className="input-field text-sm py-1 flex-1 max-w-[220px]"
+                placeholder="5491134866718"
+                value={tel}
+                onChange={(e) => setTel(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSave()}
+              />
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="btn-primary py-1 px-3 text-xs"
+              >
+                {saving ? '...' : <Check size={13} />}
+              </button>
+              <button
+                onClick={() => setEditing(false)}
+                className="text-gray-500 hover:text-gray-300 text-xs"
+              >
+                Cancelar
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={startEdit}
+              className="mt-1.5 text-xs text-orange-400 hover:text-orange-300 flex items-center gap-1"
+            >
+              <Edit2 size={11} /> Corregir teléfono
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
+// ── Fila de actividad normal ───────────────────────────────────────────────
+function QueueRow({ item }) {
+  return (
+    <div className="px-4 py-3 flex items-center gap-3">
+      <div className="shrink-0">
+        {item.status === 'sent'    && <CheckCircle size={14} className="text-green-400" />}
+        {item.status === 'pending' && <Clock       size={14} className="text-yellow-400" />}
+        {item.status === 'failed'  && <XCircle     size={14} className="text-red-400" />}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-gray-300 truncate">
+          {item.nombre_cliente || item.telefono}
+          <span className="text-gray-600 ml-2 text-xs">{item.telefono}</span>
+        </p>
+        <p className="text-[10px] text-gray-600">
+          {item.automation_nombre} ·{' '}
+          {item.status === 'pending'
+            ? `programado ${new Date(item.scheduled_for).toLocaleString('es-AR')}`
+            : item.sent_at
+            ? `enviado ${new Date(item.sent_at).toLocaleString('es-AR')}`
+            : item.error_message}
+        </p>
+      </div>
+      <span className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 ${STATUS_COLORS[item.status] || ''}`}>
+        {item.status}
+      </span>
+    </div>
+  );
+}
+
+// ── Tarjeta de automatización ──────────────────────────────────────────────
 function AutomationRow({ automation, onToggle, onDelete }) {
   const [deleting, setDeleting] = useState(false);
   const [toggling, setToggling] = useState(false);
 
   async function handleToggle() {
     setToggling(true);
-    try {
-      await onToggle(automation.id, !automation.activa);
-    } finally {
-      setToggling(false);
-    }
+    try { await onToggle(automation.id, !automation.activa); }
+    finally { setToggling(false); }
   }
 
   async function handleDelete() {
     if (!window.confirm(`¿Eliminar "${automation.nombre}"? También se eliminarán los mensajes pendientes.`)) return;
     setDeleting(true);
-    try {
-      await onDelete(automation.id);
-    } finally {
-      setDeleting(false);
-    }
+    try { await onDelete(automation.id); }
+    finally { setDeleting(false); }
   }
 
   return (
@@ -56,7 +157,9 @@ function AutomationRow({ automation, onToggle, onDelete }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-medium text-white">{automation.nombre}</p>
-            <EventoBadge evento={automation.evento} />
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent font-medium">
+              {EVENTOS.find((e) => e.value === automation.evento)?.label || automation.evento}
+            </span>
           </div>
           <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
             <span className="flex items-center gap-1">
@@ -67,8 +170,7 @@ function AutomationRow({ automation, onToggle, onDelete }) {
             </span>
             <span>Plantilla: <span className="text-gray-400">{automation.template_name}</span></span>
           </div>
-          {/* Contadores */}
-          <div className="flex items-center gap-3 mt-2">
+          <div className="flex items-center gap-3 mt-2 flex-wrap">
             <span className="text-[10px] text-yellow-400 bg-yellow-400/10 px-2 py-0.5 rounded-full">
               {automation.pending_count || 0} pendientes
             </span>
@@ -82,23 +184,15 @@ function AutomationRow({ automation, onToggle, onDelete }) {
             )}
           </div>
         </div>
-
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={handleToggle}
-            disabled={toggling}
-            title={automation.activa ? 'Desactivar' : 'Activar'}
-            className="p-1.5 rounded-lg hover:bg-white/5 transition-colors"
-          >
+          <button onClick={handleToggle} disabled={toggling} title={automation.activa ? 'Desactivar' : 'Activar'}
+            className="p-1.5 rounded-lg hover:bg-white/5 transition-colors">
             {automation.activa
               ? <ToggleRight size={20} className="text-accent" />
-              : <ToggleLeft size={20} className="text-gray-500" />}
+              : <ToggleLeft  size={20} className="text-gray-500" />}
           </button>
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className="p-1.5 rounded-lg hover:bg-red-400/10 text-gray-500 hover:text-red-400 transition-colors"
-          >
+          <button onClick={handleDelete} disabled={deleting}
+            className="p-1.5 rounded-lg hover:bg-red-400/10 text-gray-500 hover:text-red-400 transition-colors">
             <Trash2 size={14} />
           </button>
         </div>
@@ -107,19 +201,16 @@ function AutomationRow({ automation, onToggle, onDelete }) {
   );
 }
 
+// ── Modal nueva automatización ─────────────────────────────────────────────
 function NewAutomationModal({ templates, onSave, onClose }) {
   const [form, setForm] = useState({
-    nombre: '',
-    evento: 'order.completed',
-    delay_dias: 0,
-    template_name: '',
-    template_language: 'es_AR',
+    nombre: '', evento: 'order.completed', delay_dias: 0,
+    template_name: '', template_language: 'es_AR',
   });
   const [saving, setSaving] = useState(false);
 
   function update(k, v) { setForm((f) => ({ ...f, [k]: v })); }
 
-  // Cuando cambia la plantilla, sincronizar el idioma automáticamente
   function handleTemplateChange(name) {
     const found = templates.find((t) => t.name === name);
     update('template_name', name);
@@ -143,91 +234,52 @@ function NewAutomationModal({ templates, onSave, onClose }) {
     }
   }
 
-  const eventoSeleccionado = EVENTOS.find((e) => e.value === form.evento);
+  const eventoSel = EVENTOS.find((e) => e.value === form.evento);
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-base-surface border border-base-border rounded-2xl p-6 w-full max-w-lg shadow-2xl">
         <h2 className="font-display font-bold text-white text-lg mb-5">Nueva automatización</h2>
-
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="form-label">NOMBRE</label>
-            <input
-              className="input-field"
-              placeholder="ej: WhatsApp post-compra 7 días"
-              value={form.nombre}
-              onChange={(e) => update('nombre', e.target.value)}
-            />
+            <input className="input-field" placeholder="ej: WhatsApp post-compra 7 días"
+              value={form.nombre} onChange={(e) => update('nombre', e.target.value)} />
           </div>
-
           <div>
             <label className="form-label">EVENTO DISPARADOR</label>
-            <select
-              className="input-field"
-              value={form.evento}
-              onChange={(e) => update('evento', e.target.value)}
-            >
-              {EVENTOS.map((ev) => (
-                <option key={ev.value} value={ev.value}>{ev.label}</option>
-              ))}
+            <select className="input-field" value={form.evento} onChange={(e) => update('evento', e.target.value)}>
+              {EVENTOS.map((ev) => <option key={ev.value} value={ev.value}>{ev.label}</option>)}
             </select>
-            {eventoSeleccionado && (
-              <p className="text-[10px] text-gray-600 mt-1">{eventoSeleccionado.desc}</p>
-            )}
+            {eventoSel && <p className="text-[10px] text-gray-600 mt-1">{eventoSel.desc}</p>}
           </div>
-
           <div>
             <label className="form-label">ENVIAR</label>
             <div className="flex items-center gap-3">
-              <input
-                type="number"
-                min="0"
-                max="365"
-                className="input-field w-24 text-center"
-                value={form.delay_dias}
-                onChange={(e) => update('delay_dias', parseInt(e.target.value) || 0)}
-              />
+              <input type="number" min="0" max="365" className="input-field w-24 text-center"
+                value={form.delay_dias} onChange={(e) => update('delay_dias', parseInt(e.target.value) || 0)} />
               <span className="text-sm text-gray-400">
-                {form.delay_dias === 0
-                  ? 'días después del evento (inmediato)'
-                  : `día${form.delay_dias !== 1 ? 's' : ''} después del evento`}
+                {form.delay_dias === 0 ? 'días después (inmediato)' : `día${form.delay_dias !== 1 ? 's' : ''} después del evento`}
               </span>
             </div>
           </div>
-
           <div>
             <label className="form-label">PLANTILLA DE WHATSAPP</label>
             {templates.length === 0 ? (
-              <p className="text-xs text-yellow-400 mt-1">
-                No hay plantillas aprobadas. Creá una en Plantillas primero.
-              </p>
+              <p className="text-xs text-yellow-400 mt-1">No hay plantillas aprobadas. Creá una en Plantillas primero.</p>
             ) : (
-              <select
-                className="input-field"
-                value={form.template_name}
-                onChange={(e) => handleTemplateChange(e.target.value)}
-              >
+              <select className="input-field" value={form.template_name} onChange={(e) => handleTemplateChange(e.target.value)}>
                 <option value="">Seleccioná una plantilla…</option>
-                {templates.map((t) => (
-                  <option key={t.name} value={t.name}>
-                    {t.name} ({t.language})
-                  </option>
-                ))}
+                {templates.map((t) => <option key={t.name} value={t.name}>{t.name} ({t.language})</option>)}
               </select>
             )}
-            <p className="text-[10px] text-gray-600 mt-1">
-              Solo se muestran plantillas aprobadas por Meta.
-            </p>
+            <p className="text-[10px] text-gray-600 mt-1">Solo se muestran plantillas aprobadas por Meta.</p>
           </div>
-
           <div className="flex gap-3 pt-2">
             <button type="submit" disabled={saving || !form.template_name} className="btn-primary flex-1">
               {saving ? 'Guardando...' : 'Crear automatización'}
             </button>
-            <button type="button" onClick={onClose} className="btn-secondary">
-              Cancelar
-            </button>
+            <button type="button" onClick={onClose} className="btn-secondary">Cancelar</button>
           </div>
         </form>
       </div>
@@ -235,6 +287,7 @@ function NewAutomationModal({ templates, onSave, onClose }) {
   );
 }
 
+// ── Página principal ───────────────────────────────────────────────────────
 export default function Automations() {
   const [automations, setAutomations] = useState([]);
   const [queue, setQueue]             = useState([]);
@@ -248,15 +301,17 @@ export default function Automations() {
     try {
       const [autoRes, queueRes, tplRes] = await Promise.all([
         api.get('/automations'),
-        api.get('/automations/queue?limit=30'),
+        api.get('/automations/queue?limit=50'),
         api.get('/templates').catch(() => ({ data: [] })),
       ]);
       setAutomations(autoRes.data);
       setQueue(queueRes.data);
-      // Solo plantillas aprobadas
       setTemplates((tplRes.data || []).filter((t) => t.status === 'APPROVED'));
-      // URL del backend para mostrar en la guía de configuración
-      setBackendUrl(window.location.origin.replace('5173', '3001').replace('localhost:3000', 'localhost:3001'));
+      setBackendUrl(
+        window.location.origin
+          .replace('5173', '3001')
+          .replace('localhost:3000', 'localhost:3001')
+      );
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -289,7 +344,9 @@ export default function Automations() {
     toast.success('URL copiada al portapapeles');
   }
 
-  const webhookUrl = `${backendUrl || 'https://tu-backend.railway.app'}/api/woo-webhook`;
+  const webhookUrl    = `${backendUrl || 'https://tu-backend.railway.app'}/api/woo-webhook`;
+  const invalidPhones = queue.filter((q) => q.status === 'invalid_phone');
+  const normalQueue   = queue.filter((q) => q.status !== 'invalid_phone');
 
   return (
     <div className="space-y-6 animate-slide-up">
@@ -312,6 +369,26 @@ export default function Automations() {
         </div>
       </div>
 
+      {/* ── Teléfonos inválidos — sección destacada ── */}
+      {invalidPhones.length > 0 && (
+        <div className="glass-card overflow-hidden border border-orange-400/30">
+          <div className="px-4 py-3 bg-orange-400/10 flex items-center gap-2 border-b border-orange-400/20">
+            <Phone size={14} className="text-orange-400" />
+            <span className="text-sm font-medium text-orange-300">
+              {invalidPhones.length} teléfono{invalidPhones.length !== 1 ? 's' : ''} sin normalizar
+            </span>
+            <span className="text-[10px] text-orange-400/70 ml-1">
+              — corregí el número para que el mensaje se envíe
+            </span>
+          </div>
+          <div className="divide-y divide-base-border">
+            {invalidPhones.map((item) => (
+              <InvalidPhoneRow key={item.id} item={item} onFixed={fetchAll} />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Guía de configuración WooCommerce */}
       <div className="glass-card p-4 border border-blue-500/20 bg-blue-500/5">
         <div className="flex items-start gap-3">
@@ -321,27 +398,15 @@ export default function Automations() {
               Configuración requerida en WooCommerce
             </p>
             <p className="text-xs text-gray-400 mb-3">
-              Para que las automatizaciones funcionen, configurá webhooks en tu WooCommerce:
-              <br />
               <strong className="text-gray-300">WooCommerce → Ajustes → Avanzado → Webhooks → Añadir webhook</strong>
+              <br />Tema: <strong className="text-gray-300">Pedido actualizado</strong> · Estado: Activo
             </p>
-            <div className="space-y-1 text-xs text-gray-400">
-              <p>• Estado: <span className="text-green-400">Activo</span></p>
-              <p>• Tema: <span className="text-gray-300">Pedido completado</span> (o el evento que corresponda)</p>
-              <p>• URL de entrega:</p>
-            </div>
-            <div className="flex items-center gap-2 mt-2 bg-black/30 rounded-lg px-3 py-2">
+            <div className="flex items-center gap-2 bg-black/30 rounded-lg px-3 py-2">
               <code className="text-xs text-accent flex-1 break-all">{webhookUrl}</code>
-              <button
-                onClick={() => copyUrl(webhookUrl)}
-                className="text-gray-500 hover:text-gray-300 shrink-0"
-              >
+              <button onClick={() => copyUrl(webhookUrl)} className="text-gray-500 hover:text-gray-300 shrink-0">
                 <Copy size={13} />
               </button>
             </div>
-            <p className="text-[10px] text-gray-600 mt-2">
-              Creá un webhook por cada evento que quieras monitorear (completado, nuevo, cliente nuevo).
-            </p>
           </div>
         </div>
       </div>
@@ -349,76 +414,38 @@ export default function Automations() {
       {/* Lista de automatizaciones */}
       {loading ? (
         <div className="space-y-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="skeleton h-20 rounded-xl" />
-          ))}
+          {Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-20 rounded-xl" />)}
         </div>
       ) : automations.length === 0 ? (
         <div className="glass-card p-12 text-center">
           <Zap size={32} className="mx-auto mb-3 text-gray-600" />
           <p className="text-gray-500 text-sm">No hay automatizaciones configuradas.</p>
-          <p className="text-gray-600 text-xs mt-1">
-            Creá una para empezar a enviar WhatsApps automáticos.
-          </p>
+          <p className="text-gray-600 text-xs mt-1">Creá una para empezar a enviar WhatsApps automáticos.</p>
         </div>
       ) : (
         <div className="space-y-3">
           {automations.map((a) => (
-            <AutomationRow
-              key={a.id}
-              automation={a}
-              onToggle={handleToggle}
-              onDelete={handleDelete}
-            />
+            <AutomationRow key={a.id} automation={a} onToggle={handleToggle} onDelete={handleDelete} />
           ))}
         </div>
       )}
 
-      {/* Historial de la cola */}
-      {queue.length > 0 && (
+      {/* Historial de actividad normal */}
+      {normalQueue.length > 0 && (
         <div>
           <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">
             Actividad reciente
           </h2>
           <div className="glass-card overflow-hidden">
             <div className="divide-y divide-base-border">
-              {queue.map((item) => (
-                <div key={item.id} className="px-4 py-3 flex items-center gap-3">
-                  <div className="shrink-0">
-                    {item.status === 'sent'    && <CheckCircle size={14} className="text-green-400" />}
-                    {item.status === 'pending' && <Clock       size={14} className="text-yellow-400" />}
-                    {item.status === 'failed'  && <XCircle     size={14} className="text-red-400" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-gray-300 truncate">
-                      {item.nombre_cliente || item.telefono}
-                      <span className="text-gray-600 ml-2 text-xs">{item.telefono}</span>
-                    </p>
-                    <p className="text-[10px] text-gray-600">
-                      {item.automation_nombre} ·{' '}
-                      {item.status === 'pending'
-                        ? `programado ${new Date(item.scheduled_for).toLocaleString('es-AR')}`
-                        : item.sent_at
-                        ? `enviado ${new Date(item.sent_at).toLocaleString('es-AR')}`
-                        : item.error_message}
-                    </p>
-                  </div>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 ${STATUS_COLORS[item.status] || ''}`}>
-                    {item.status}
-                  </span>
-                </div>
-              ))}
+              {normalQueue.map((item) => <QueueRow key={item.id} item={item} />)}
             </div>
           </div>
         </div>
       )}
 
       {showModal && (
-        <NewAutomationModal
-          templates={templates}
-          onSave={handleCreate}
-          onClose={() => setShowModal(false)}
-        />
+        <NewAutomationModal templates={templates} onSave={handleCreate} onClose={() => setShowModal(false)} />
       )}
     </div>
   );
