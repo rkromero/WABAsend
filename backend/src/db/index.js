@@ -158,6 +158,54 @@ export async function initSchema() {
     console.warn('[DB] contacts_telefono_unique warning:', err.message.split('\n')[0]);
   }
 
+  // 5. Tablas de automatizaciones basadas en eventos WooCommerce
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS waba_automations (
+      id                SERIAL PRIMARY KEY,
+      nombre            VARCHAR(255) NOT NULL,
+      evento            VARCHAR(50)  NOT NULL,
+      delay_dias        INT          NOT NULL DEFAULT 0,
+      template_name     VARCHAR(255) NOT NULL,
+      template_language VARCHAR(10)  NOT NULL DEFAULT 'es_AR',
+      activa            BOOLEAN      NOT NULL DEFAULT true,
+      created_at        TIMESTAMP DEFAULT NOW(),
+      updated_at        TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS waba_automation_queue (
+      id                  SERIAL PRIMARY KEY,
+      automation_id       INT REFERENCES waba_automations(id) ON DELETE CASCADE,
+      telefono            VARCHAR(20)  NOT NULL,
+      nombre_cliente      VARCHAR(255),
+      email               VARCHAR(255),
+      woo_order_id        VARCHAR(50),
+      scheduled_for       TIMESTAMP    NOT NULL,
+      status              VARCHAR(20)  NOT NULL DEFAULT 'pending',
+      whatsapp_message_id VARCHAR(255),
+      error_message       TEXT,
+      sent_at             TIMESTAMP,
+      created_at          TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_waba_aq_pending
+      ON waba_automation_queue(scheduled_for)
+      WHERE status = 'pending';
+
+    CREATE INDEX IF NOT EXISTS idx_waba_aq_automation
+      ON waba_automation_queue(automation_id);
+  `);
+
+  // Unique index para evitar encolar el mismo pedido dos veces en la misma automatización
+  try {
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_waba_aq_unique_order
+        ON waba_automation_queue(automation_id, woo_order_id)
+        WHERE woo_order_id IS NOT NULL;
+    `);
+  } catch (err) {
+    console.warn('[DB] idx_waba_aq_unique_order warning:', err.message.split('\n')[0]);
+  }
+
   console.log('[DB] Esquema inicializado correctamente');
 }
 
