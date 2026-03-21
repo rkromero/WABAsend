@@ -54,7 +54,13 @@ export function normalizarTelefono(raw) {
     return `549${tel.slice(0, 3)}${tel.slice(5)}`;
   }
 
-  // 11 dígitos con área 11 (CABA/GBA): 11 + 15 + 7 dígitos
+  // 12 dígitos con área 11 (CABA/GBA): 11 + 15 + 8 dígitos (ej: 011-15-63646709)
+  // CABA tiene números locales de 8 dígitos, no 7
+  if (tel.length === 12 && tel.startsWith('11') && tel.slice(2, 4) === '15') {
+    return `549${tel.slice(0, 2)}${tel.slice(4)}`;
+  }
+
+  // 11 dígitos con área 11 + 15 + 7 dígitos (formato anterior a 2011)
   if (tel.length === 11 && tel.startsWith('11') && tel.slice(2, 4) === '15') {
     return `549${tel.slice(0, 2)}${tel.slice(4)}`;
   }
