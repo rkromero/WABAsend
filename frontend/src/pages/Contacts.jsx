@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, Search, Trash2, Upload, ChevronLeft, ChevronRight, Tag } from 'lucide-react';
+import { Users, Search, Trash2, Upload, ChevronLeft, ChevronRight, Tag, Edit2, Check, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -15,7 +15,10 @@ export default function Contacts() {
   const [segments, setSegments]   = useState([]);    // lista de segmentos únicos
   const [loading, setLoading]     = useState(true);
   const [showUpload, setShowUpload] = useState(false);
-  const [deleting, setDeleting]   = useState(null);
+  const [deleting, setDeleting]         = useState(null);
+  const [editingPhone, setEditingPhone] = useState(null); // id del contacto en edición
+  const [phoneValue, setPhoneValue]     = useState('');
+  const [savingPhone, setSavingPhone]   = useState(false);
 
   const LIMIT = 20;
   const totalPages = Math.ceil(total / LIMIT);
@@ -79,6 +82,35 @@ export default function Contacts() {
     'text-blue-400 bg-blue-400/8 border-blue-400/20',
     'text-rose-400 bg-rose-400/8 border-rose-400/20',
   ];
+
+  function startEditPhone(c) {
+    setEditingPhone(c.id);
+    setPhoneValue(c.telefono);
+  }
+
+  function cancelEditPhone() {
+    setEditingPhone(null);
+    setPhoneValue('');
+  }
+
+  async function savePhone(id) {
+    const limpio = phoneValue.replace(/\D/g, '');
+    if (limpio.length < 10 || limpio.length > 15) {
+      toast.error('Teléfono inválido — debe tener entre 10 y 15 dígitos');
+      return;
+    }
+    setSavingPhone(true);
+    try {
+      await api.put(`/contacts/${id}`, { telefono: limpio });
+      toast.success('Teléfono actualizado');
+      setEditingPhone(null);
+      fetchContacts();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSavingPhone(false);
+    }
+  }
 
   function segmentColor(seg) {
     const idx = segments.findIndex((s) => s.segmento === seg);
@@ -204,7 +236,46 @@ export default function Contacts() {
                 {contacts.map((c) => (
                   <tr key={c.id} className="hover:bg-white/[0.02] transition-colors group">
                     <td className="py-3 px-5 text-gray-200 font-medium">{c.nombre}</td>
-                    <td className="py-3 px-5 text-gray-400 font-mono text-xs">{c.telefono}</td>
+                    <td className="py-3 px-5">
+                      {editingPhone === c.id ? (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            autoFocus
+                            className="input-field py-1 text-xs font-mono w-40"
+                            value={phoneValue}
+                            onChange={(e) => setPhoneValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') savePhone(c.id);
+                              if (e.key === 'Escape') cancelEditPhone();
+                            }}
+                          />
+                          <button
+                            onClick={() => savePhone(c.id)}
+                            disabled={savingPhone}
+                            className="text-green-400 hover:text-green-300 p-0.5"
+                          >
+                            <Check size={13} />
+                          </button>
+                          <button
+                            onClick={cancelEditPhone}
+                            className="text-gray-500 hover:text-gray-300 p-0.5"
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 group/phone">
+                          <span className="text-gray-400 font-mono text-xs">{c.telefono}</span>
+                          <button
+                            onClick={() => startEditPhone(c)}
+                            className="opacity-0 group-hover/phone:opacity-100 transition-opacity text-gray-600 hover:text-gray-300"
+                            title="Editar teléfono"
+                          >
+                            <Edit2 size={11} />
+                          </button>
+                        </div>
+                      )}
+                    </td>
                     <td className="py-3 px-5 text-gray-400 text-xs hidden md:table-cell">
                       {c.email || <span className="text-gray-600">—</span>}
                     </td>

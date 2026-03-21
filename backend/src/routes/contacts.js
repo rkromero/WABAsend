@@ -163,6 +163,50 @@ router.post('/bulk', async (req, res) => {
   res.json({ success: true, data: { imported, skipped, errors: errors.slice(0, 50) } });
 });
 
+// PUT /api/contacts/:id — editar teléfono (y opcionalmente nombre, email, segmento)
+router.put('/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) return res.status(400).json({ success: false, error: 'ID inválido' });
+
+  const { nombre, telefono, email, segmento } = req.body;
+
+  if (telefono !== undefined) {
+    const telLimpio = String(telefono).replace(/\D/g, '');
+    if (telLimpio.length < 10 || telLimpio.length > 15) {
+      return res.status(400).json({
+        success: false,
+        error: `Teléfono inválido: "${telLimpio}" — debe tener entre 10 y 15 dígitos`,
+      });
+    }
+  }
+
+  try {
+    const result = await query(
+      `UPDATE waba_contacts
+       SET nombre   = COALESCE($1, nombre),
+           telefono = COALESCE($2, telefono),
+           email    = COALESCE($3, email),
+           segmento = COALESCE($4, segmento)
+       WHERE id = $5
+       RETURNING *`,
+      [
+        nombre   || null,
+        telefono ? String(telefono).replace(/\D/g, '') : null,
+        email    || null,
+        segmento || null,
+        id,
+      ]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Contacto no encontrado' });
+    }
+    res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('[Contacts] PUT error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // DELETE /api/contacts/:id
 router.delete('/:id', async (req, res) => {
   const id = parseInt(req.params.id);
