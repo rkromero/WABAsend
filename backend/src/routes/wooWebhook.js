@@ -75,13 +75,22 @@ router.post('/', async (req, res) => {
         return;
       }
 
+      // WooCommerce no tiene "order.completed" como tema separado.
+      // Usa "order.updated" para todos los cambios de estado.
+      // Cuando el status del pedido es "completed", lo mapeamos a order.completed.
+      let eventoNormalizado = topic;
+      if (topic === 'order.updated' && req.body?.status === 'completed') {
+        eventoNormalizado = 'order.completed';
+        console.log(`[WooWebhook] order.updated con status=completed → mapeado a order.completed`);
+      }
+
       const EVENTOS_SOPORTADOS = ['order.completed', 'order.created', 'customer.created'];
-      if (!EVENTOS_SOPORTADOS.includes(topic)) {
-        console.log(`[WooWebhook] Evento "${topic}" no tiene automatizaciones configuradas`);
+      if (!EVENTOS_SOPORTADOS.includes(eventoNormalizado)) {
+        console.log(`[WooWebhook] Evento "${topic}" (status: ${req.body?.status}) sin automatizaciones`);
         return;
       }
 
-      await processWooEvent(topic, req.body);
+      await processWooEvent(eventoNormalizado, req.body);
     } catch (err) {
       console.error('[WooWebhook] Error procesando evento:', err.message);
     }
