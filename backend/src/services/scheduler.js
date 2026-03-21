@@ -14,6 +14,7 @@
 import cron from 'node-cron';
 import { query } from '../db/index.js';
 import { sendTemplateMessage, sleep } from './whatsapp.js';
+import { processAutomationQueue } from './automations.js';
 
 // Previene ejecuciones concurrentes del mismo scheduler
 let isRunning = false;
@@ -148,10 +149,17 @@ async function checkAndRunScheduledCampaigns() {
 export function startScheduler() {
   console.log('[Scheduler] Iniciado — chequeando cada minuto');
 
-  // Expresión cron: cada minuto
+  // Campañas programadas: cada minuto
   cron.schedule('* * * * *', () => {
     checkAndRunScheduledCampaigns().catch((err) => {
       console.error('[Scheduler] Error no capturado:', err.message);
+    });
+  });
+
+  // Cola de automatizaciones WooCommerce: cada minuto
+  cron.schedule('* * * * *', () => {
+    processAutomationQueue().catch((err) => {
+      console.error('[Automations Queue] Error no capturado:', err.message);
     });
   });
 }

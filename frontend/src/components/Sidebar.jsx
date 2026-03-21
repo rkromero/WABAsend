@@ -10,11 +10,13 @@ import {
   MessageSquare,
   Bot,
   ShoppingBag,
+  Zap,
 } from 'lucide-react';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/campaigns', icon: Send, label: 'Campañas' },
+  { to: '/automations', icon: Zap, label: 'Automatizaciones' },
   { to: '/inbox', icon: MessageSquare, label: 'Bandeja' },
   { to: '/bot', icon: Bot, label: 'Bot' },
   { to: '/products', icon: ShoppingBag, label: 'Productos' },
