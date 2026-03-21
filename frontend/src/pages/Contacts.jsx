@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, Search, Trash2, Upload, ChevronLeft, ChevronRight, Tag, Edit2, Check, X, AlertTriangle } from 'lucide-react';
+import { Users, Search, Trash2, Upload, ChevronLeft, ChevronRight, Tag, Edit2, Check, X, AlertTriangle, Wand2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -16,6 +16,7 @@ export default function Contacts() {
   const [loading, setLoading]     = useState(true);
   const [showUpload, setShowUpload] = useState(false);
   const [deleting, setDeleting]         = useState(null);
+  const [normalizing, setNormalizing]   = useState(false);
   const [editingPhone, setEditingPhone] = useState(null); // id del contacto en edición
   const [phoneValue, setPhoneValue]     = useState('');
   const [savingPhone, setSavingPhone]   = useState(false);
@@ -57,6 +58,27 @@ export default function Contacts() {
 
   function handleSegmento(seg) {
     setSegmento((prev) => (prev === seg ? '' : seg));
+  }
+
+  async function handleNormalize() {
+    if (!window.confirm('¿Normalizar todos los teléfonos al formato internacional (549XXXXXXXXXX)? Se actualizarán los que no estén en formato correcto.')) return;
+    setNormalizing(true);
+    try {
+      const r = await api.post('/contacts/normalize-phones');
+      const { updated, already_valid, failed } = r.data;
+      if (updated > 0) {
+        toast.success(`✓ ${updated} teléfono${updated !== 1 ? 's' : ''} normalizado${updated !== 1 ? 's' : ''} · ${already_valid} ya estaban bien${failed > 0 ? ` · ${failed} sin resolver` : ''}`);
+        fetchContacts();
+      } else if (failed > 0) {
+        toast.error(`${already_valid} ya estaban correctos · ${failed} no se pudieron normalizar`);
+      } else {
+        toast.success(`Todos los teléfonos (${already_valid}) ya están en formato correcto`);
+      }
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setNormalizing(false);
+    }
   }
 
   async function handleDelete(id, nombre) {
@@ -130,13 +152,24 @@ export default function Contacts() {
           <h1 className="font-display text-2xl font-bold text-white">Contactos</h1>
           <p className="text-sm text-gray-500 mt-1">{total.toLocaleString()} contacto(s){segmento ? ` en "${segmento}"` : ' en total'}</p>
         </div>
-        <button
-          onClick={() => setShowUpload((v) => !v)}
-          className="btn-primary"
-        >
-          <Upload size={15} />
-          {showUpload ? 'Ocultar' : 'Importar Excel'}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleNormalize}
+            disabled={normalizing}
+            className="btn-secondary"
+            title="Normaliza todos los teléfonos al formato 549XXXXXXXXXX requerido por WhatsApp"
+          >
+            <Wand2 size={14} className={normalizing ? 'animate-spin' : ''} />
+            {normalizing ? 'Normalizando...' : 'Normalizar teléfonos'}
+          </button>
+          <button
+            onClick={() => setShowUpload((v) => !v)}
+            className="btn-primary"
+          >
+            <Upload size={15} />
+            {showUpload ? 'Ocultar' : 'Importar Excel'}
+          </button>
+        </div>
       </div>
 
       {/* Uploader */}

@@ -6,8 +6,58 @@
 
 import { Router } from 'express';
 import { query } from '../db/index.js';
+import { normalizarTelefono } from '../services/automations.js';
 
 const router = Router();
+
+// POST /api/contacts/normalize-phones — normaliza todos los teléfonos al formato 549XXXXXXXXXX
+// Corre la misma lógica que se usa al recibir webhooks de WooCommerce.
+// Solo actualiza los que cambian; los ya válidos se dejan intactos.
+router.post('/normalize-phones', async (req, res) => {
+  try {
+    const allContacts = await query('SELECT id, telefono FROM waba_contacts');
+    let updated = 0, already_valid = 0, failed = 0;
+    const failures = [];
+
+    for (const c of allContacts.rows) {
+      // Ya está en formato correcto
+      if (/^549\d{10}$/.test(c.telefono)) {
+        already_valid++;
+        continue;
+      }
+
+      const normalizado = normalizarTelefono(c.telefono);
+
+      if (!normalizado) {
+        failed++;
+        failures.push({ id: c.id, telefono: c.telefono });
+        continue;
+      }
+
+      // El número cambió — actualizar
+      try {
+        await query(
+          'UPDATE waba_contacts SET telefono = $1 WHERE id = $2',
+          [normalizado, c.id]
+        );
+        updated++;
+      } catch (updateErr) {
+        // Puede fallar si el número normalizado ya existe (UNIQUE)
+        failed++;
+        failures.push({ id: c.id, telefono: c.telefono, error: updateErr.message });
+      }
+    }
+
+    console.log(`[Contacts] Normalización: ${updated} actualizados, ${already_valid} ya válidos, ${failed} sin resolver`);
+    res.json({
+      success: true,
+      data: { updated, already_valid, failed, failures: failures.slice(0, 50) },
+    });
+  } catch (err) {
+    console.error('[Contacts] normalize-phones error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // GET /api/contacts/segments — lista de segmentos únicos existentes
 router.get('/segments', async (req, res) => {
