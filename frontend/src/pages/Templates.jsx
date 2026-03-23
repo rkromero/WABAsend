@@ -126,11 +126,12 @@ function NewTemplateForm({ onSuccess, onCancel }) {
       return;
     }
 
+    const hasVariable = /\{\{\d+\}\}/.test(form.bodyText);
     const components = [
       {
         type: 'BODY',
         text: form.bodyText,
-        example: { body_text: [['Juan']] },
+        ...(hasVariable ? { example: { body_text: [['Juan']] } } : {}),
       },
     ];
 

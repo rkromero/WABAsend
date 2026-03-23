@@ -59,6 +59,23 @@ router.post('/normalize-phones', async (req, res) => {
   }
 });
 
+// GET /api/contacts/test-normalize?phone=X — diagnostico de normalización
+router.get('/test-normalize', (req, res) => {
+  const raw = String(req.query.phone || '');
+  const resultado = normalizarTelefono(raw);
+  const limpio = raw.replace(/[\s\-\(\)\+\.]/g, '');
+  res.json({
+    input: raw,
+    limpio,
+    length_limpio: limpio.length,
+    starts_with_0: limpio.startsWith('0'),
+    sin_cero: limpio.startsWith('0') ? limpio.slice(1) : limpio,
+    sin_cero_length: (limpio.startsWith('0') ? limpio.slice(1) : limpio).length,
+    resultado,
+    ya_valido: /^549\d{10}$/.test(limpio),
+  });
+});
+
 // GET /api/contacts/segments — lista de segmentos únicos existentes
 router.get('/segments', async (req, res) => {
   try {
