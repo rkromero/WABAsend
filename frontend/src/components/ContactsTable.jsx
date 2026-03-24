@@ -48,6 +48,9 @@ export default function ContactsTable({ logs = [], loading = false }) {
             <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
               Actualizado
             </th>
+            <th className="text-left py-3 px-4 text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Error
+            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-base-border">
@@ -70,6 +73,11 @@ export default function ContactsTable({ logs = [], loading = false }) {
                 {log.updated_at
                   ? format(new Date(log.updated_at), 'dd MMM HH:mm', { locale: es })
                   : '—'}
+              </td>
+              <td className="py-3 px-4 text-xs max-w-xs">
+                {log.error_message
+                  ? <span className="text-red-400" title={log.error_message}>{log.error_message}</span>
+                  : <span className="text-gray-600">—</span>}
               </td>
             </tr>
           ))}
