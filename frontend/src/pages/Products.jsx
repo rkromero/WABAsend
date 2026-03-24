@@ -14,6 +14,7 @@ import {
   Zap,
   Ban,
   RotateCcw,
+  Sparkles,
 } from 'lucide-react';
 
 const API = import.meta.env.VITE_API_URL || '';
@@ -22,7 +23,8 @@ export default function Products() {
   const [products, setProducts]   = useState([]);
   const [stats, setStats]         = useState(null);
   const [loading, setLoading]     = useState(true);
-  const [syncing, setSyncing]     = useState(false);
+  const [syncing, setSyncing]         = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [search, setSearch]       = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [pagination, setPagination] = useState({ page: 1, total: 0, totalPages: 1 });
@@ -92,6 +94,27 @@ export default function Products() {
       showToast('Error al sincronizar', 'error');
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleRegenerateVision = async () => {
+    setRegenerating(true);
+    try {
+      const res = await fetch(`${API}/api/products/regenerate-vision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 100 }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('Regeneración iniciada — se procesa en background (hasta 100 productos). Refrescá en unos minutos.');
+      } else {
+        showToast(data.error || 'Error al iniciar regeneración', 'error');
+      }
+    } catch {
+      showToast('Error de conexión', 'error');
+    } finally {
+      setRegenerating(false);
     }
   };
 
@@ -168,6 +191,15 @@ export default function Products() {
           >
             <Zap size={14} />
             Sync completa
+          </button>
+          <button
+            onClick={handleRegenerateVision}
+            disabled={regenerating || syncing}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-purple-500/10 border border-purple-500/20 text-purple-400 hover:bg-purple-500/20 transition-all disabled:opacity-50"
+            title="Regenera las descripciones IA de todos los productos con el nuevo formato estructurado"
+          >
+            <Sparkles size={14} className={regenerating ? 'animate-pulse' : ''} />
+            {regenerating ? 'Iniciando...' : 'Regenerar Vision'}
           </button>
         </div>
       </div>
