@@ -195,11 +195,30 @@ export async function generateBotResponse(userMessage, conversationHistory = [])
     throw new Error('OPENAI_API_KEY no está definida en las variables de entorno');
   }
 
+  // Detectar si el mensaje actual es demasiado corto o conversacional para buscar productos.
+  // Mensajes como "dale", "si", "otro", "ok", "anchos" no tienen contexto suficiente.
+  // En ese caso, combinamos con el último mensaje del usuario en el historial para
+  // mantener el contexto de la búsqueda anterior.
+  const MENSAJES_CORTOS = /^(dale|si|sí|ok|bueno|otro|otra|más|mas|show|ver|muéstrame|mostrame|cuál|cual|éste|este|porqué|porque|genial|perfecto|excelente|gracias|joya|bárbaro|barbaro|nada|ninguno|ninguna|listo)$/i;
+  const esCorto = userMessage.trim().length <= 6 || MENSAJES_CORTOS.test(userMessage.trim());
+
+  let searchQuery = userMessage;
+  if (esCorto && conversationHistory.length > 0) {
+    // Tomar el último mensaje del usuario en el historial para dar contexto a la búsqueda
+    const lastUserMsg = [...conversationHistory]
+      .reverse()
+      .find((m) => m.role === 'user')?.content || '';
+    if (lastUserMsg) {
+      searchQuery = `${lastUserMsg} ${userMessage}`;
+      console.log(`[Bot] Mensaje corto detectado — búsqueda con contexto: "${searchQuery.substring(0, 80)}"`);
+    }
+  }
+
   // Buscar productos relevantes en el catálogo según el mensaje del usuario.
   // Siempre se busca en waba_products (BD local), independientemente de si WooCommerce está conectado.
   let productosContext = '';
   try {
-    const products = await searchRelevantProducts(userMessage, 6);
+    const products = await searchRelevantProducts(searchQuery, 6);
     productosContext = formatProductsForPrompt(products);
     if (products.length > 0) {
       console.log(`[Bot] ${products.length} producto(s) relevante(s) inyectados en el prompt`);
@@ -212,8 +231,13 @@ export async function generateBotResponse(userMessage, conversationHistory = [])
   // Cargar base de conocimiento (políticas, FAQs, info de la empresa)
   const knowledgeContext = await getKnowledgeContext();
 
-  // System prompt = instrucciones del usuario + conocimiento + productos disponibles
-  const systemPrompt = config.prompt + knowledgeContext + productosContext;
+  // INSTRUCCIÓN ANTI-ALUCINACIÓN DE URLs:
+  // El bot solo puede mencionar URLs de productos que estén explícitamente listados
+  // en el bloque PRODUCTOS DISPONIBLES EN STOCK. Cualquier URL inventada será interceptada.
+  const antiHallucinationRule = '\n\nREGLA IMPORTANTE: Solo podés incluir links/URLs de productos que aparezcan EXACTAMENTE en la lista de PRODUCTOS DISPONIBLES EN STOCK que se te proporcionó. Nunca inventes ni construyas URLs. Si no tenés el link del producto en la lista, describí el producto sin incluir link.';
+
+  // System prompt = instrucciones del usuario + conocimiento + productos disponibles + regla anti-alucinación
+  const systemPrompt = config.prompt + knowledgeContext + productosContext + antiHallucinationRule;
 
   const response = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
@@ -269,7 +293,7 @@ export async function sanitizeBotResponse(text) {
       console.warn(
         `[Bot] URL(s) no encontrada(s) en el catálogo: ${invalidUrls.join(', ')} — interceptando respuesta`
       );
-      return 'Por ahora no tenemos productos que coincidan con esa búsqueda. ¿Querés que te muestre opciones similares?';
+      return 'Por ahora no tenemos productos que coincidan exactamente con esa búsqueda. ¿En qué más te puedo ayudar?';
     }
   } catch (err) {
     // Si falla la validación, pasamos la respuesta original — mejor enviar que silenciar
