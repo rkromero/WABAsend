@@ -234,3 +234,47 @@ export async function generateBotResponse(userMessage, conversationHistory = [])
 
   return text.trim();
 }
+
+/**
+ * Valida que todas las URLs mencionadas en la respuesta del bot existan
+ * como permalinks activos en el catálogo de productos (waba_products).
+ *
+ * Si el bot alucinó una URL que no está en el catálogo, intercepta la
+ * respuesta completa y la reemplaza por un mensaje seguro.
+ * Si no hay URLs en la respuesta, la devuelve sin cambios.
+ *
+ * @param {string} text - Respuesta generada por el bot
+ * @returns {Promise<string>} Respuesta original o mensaje de fallback
+ */
+export async function sanitizeBotResponse(text) {
+  // Extraer todas las URLs HTTP/HTTPS del texto
+  const urlMatches = text.match(/https?:\/\/[^\s\)\]>,"']+/g);
+
+  // Sin URLs → nada que validar
+  if (!urlMatches || urlMatches.length === 0) return text;
+
+  // Limpiar puntuación final que puede pegarse a la URL (punto, coma, etc.)
+  const urls = urlMatches.map((u) => u.replace(/[.,;:!?]+$/, ''));
+
+  try {
+    const result = await query(
+      'SELECT permalink FROM waba_products WHERE permalink = ANY($1::text[]) AND activo = true',
+      [urls]
+    );
+
+    const existingUrls = new Set(result.rows.map((r) => r.permalink));
+    const invalidUrls = urls.filter((u) => !existingUrls.has(u));
+
+    if (invalidUrls.length > 0) {
+      console.warn(
+        `[Bot] URL(s) no encontrada(s) en el catálogo: ${invalidUrls.join(', ')} — interceptando respuesta`
+      );
+      return 'Por ahora no tenemos productos que coincidan con esa búsqueda. ¿Querés que te muestre opciones similares?';
+    }
+  } catch (err) {
+    // Si falla la validación, pasamos la respuesta original — mejor enviar que silenciar
+    console.error('[Bot] Error al validar URLs de la respuesta:', err.message);
+  }
+
+  return text;
+}

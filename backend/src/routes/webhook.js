@@ -17,7 +17,7 @@ import {
   getOrCreateConversation,
   sendMessageToConversation,
 } from '../services/chatwoot.js';
-import { shouldBotRespond, generateBotResponse } from '../services/bot.js';
+import { shouldBotRespond, generateBotResponse, sanitizeBotResponse } from '../services/bot.js';
 import { sendFreeTextMessage } from '../services/whatsapp.js';
 import { getConversationHistory, saveConversationTurn } from '../services/conversationMemory.js';
 
@@ -145,7 +145,11 @@ async function processIncomingMessage({ telefono, nombre, messageText, waMessage
       // Recuperar historial completo (user + assistant) de los últimos 24h / 20 mensajes
       const conversationHistory = await getConversationHistory(telefono);
 
-      const botResponse = await generateBotResponse(messageText, conversationHistory);
+      const rawBotResponse = await generateBotResponse(messageText, conversationHistory);
+
+      // Validar que ninguna URL de la respuesta sea una alucinación:
+      // si el bot inventó un permalink que no existe en el catálogo, reemplazamos la respuesta.
+      const botResponse = await sanitizeBotResponse(rawBotResponse);
 
       // Enviar respuesta por WhatsApp (solo funciona en ventana de 24h)
       const botMessageId = await sendFreeTextMessage(telefono, botResponse);
