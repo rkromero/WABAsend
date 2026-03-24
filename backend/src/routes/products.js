@@ -7,7 +7,7 @@
 import { Router } from 'express';
 import axios from 'axios';
 import { query } from '../db/index.js';
-import { syncProducts } from '../services/woocommerce.js';
+import { syncProducts, regenerateVisionDescriptions } from '../services/woocommerce.js';
 
 const router = Router();
 
@@ -182,6 +182,31 @@ router.post('/sync', async (req, res) => {
     console.error('[Products] Error en sync manual:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// POST /api/products/regenerate-vision — regenera descripciones Vision con el nuevo prompt estructurado
+// Útil para aplicar el nuevo formato de atributos a productos que ya estaban en la DB.
+// El proceso corre en background; el endpoint devuelve 202 inmediatamente.
+router.post('/regenerate-vision', async (req, res) => {
+  if (!process.env.OPENAI_API_KEY) {
+    return res.status(400).json({
+      success: false,
+      error: 'OPENAI_API_KEY no está configurada en las variables de entorno',
+    });
+  }
+
+  // Aceptamos un límite opcional para no regenerar todo el catálogo de una vez
+  const limit = Math.min(500, Math.max(1, parseInt(req.body?.limit) || 100));
+
+  res.status(202).json({
+    success: true,
+    message: `Regenerando descripciones Vision (hasta ${limit} productos). El proceso corre en background.`,
+  });
+
+  // Ejecutar en background para no bloquear el request
+  regenerateVisionDescriptions(limit).catch((err) => {
+    console.error('[Products] Error en regenerate-vision:', err.message);
+  });
 });
 
 export default router;

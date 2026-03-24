@@ -187,11 +187,94 @@ async function fetchVariations(productId) {
 }
 
 /**
- * Usa GPT-4o Vision para analizar la imagen del producto y generar una descripción
- * enriquecida combinando lo visual con el texto de la descripción del producto.
+ * Detecta la categoría de prenda a partir del nombre y categorías del producto.
+ * Usado para adaptar el prompt de Vision a los atributos relevantes de cada tipo.
  *
- * Recibe el texto limpio de la descripción (corta + larga) para que el modelo
- * pueda leer tablas de talles, materiales y detalles que no son visibles en la imagen.
+ * @param {string} nombre
+ * @param {string} categorias
+ * @returns {'parte_arriba'|'pantalon'|'vestido_falda'|'otro'}
+ */
+function detectGarmentCategory(nombre, categorias) {
+  const text = `${nombre} ${categorias}`.toLowerCase();
+  if (/sweater|remera|blusa|camisa|top\b|camiseta|musculosa|body\b|cardigan|chaleco|túnica|tunica/.test(text)) {
+    return 'parte_arriba';
+  }
+  if (/pantalon|pantalón|jean|jeans|short\b|bermuda|capri/.test(text)) {
+    return 'pantalon';
+  }
+  if (/vestido|falda|pollera/.test(text)) {
+    return 'vestido_falda';
+  }
+  return 'otro';
+}
+
+/**
+ * Construye el prompt de Vision adaptado a la categoría de la prenda.
+ * Cada categoría extrae atributos específicos para mejorar la búsqueda por lenguaje natural.
+ *
+ * @param {string} nombre
+ * @param {string} categorias
+ * @param {'parte_arriba'|'pantalon'|'vestido_falda'|'otro'} category
+ * @param {string} descripcionTexto
+ * @returns {string}
+ */
+function buildVisionPrompt(nombre, categorias, category, descripcionTexto) {
+  const textoContexto = descripcionTexto
+    ? `\n\nInformación adicional (descripción de la tienda):\n${descripcionTexto.substring(0, 1200)}`
+    : '';
+
+  // Atributos comunes a todas las categorías
+  const atributosGenerales = `
+- Color principal y tono exacto (ej: "verde musgo", "azul marino", "bordo oscuro", "camel", "blanco hueso")
+- Patrón: liso / rayas / cuadrillé / animal print / floral / tie-dye
+- Ocasión de uso: trabajo / casual / salida nocturna / fiesta / playa / deporte
+- Estilo general: clásico / romántico / sporty / boho / minimalista / urbano
+- Combinaciones sugeridas con otras prendas o accesorios que se puedan inferir de la imagen`;
+
+  let atributosEspecificos = '';
+  if (category === 'parte_arriba') {
+    atributosEspecificos = `
+- Tipo de manga: larga / corta / sin manga / 3/4 / globo / campana
+- Tipo de escote: V / redondo / cuadrado / halter / off-shoulder / polo / bote / asimétrico
+- Largo de la prenda: corto / a la cadera / largo / oversize
+- Ajuste al cuerpo: ajustado / suelto / entallado / oversize / crop
+- Tela o textura: punto / gasa / algodón / lino / tejido grueso / seda / satén / crochet
+- Detalles visuales: volados / botones / lazo / bordado / estampado / liso / flecos / encaje
+- Temporada sugerida: verano / invierno / primavera-otoño / todo el año`;
+  } else if (category === 'pantalon') {
+    atributosEspecificos = `
+- Corte y silueta: recto / wide leg / skinny / barrel / bootcut / mom / palazzo
+- Tiro: alto / medio / bajo
+- Largo: largo / capri / bermuda / corto
+- Textura o lavado (si es jean): liso / desgastado / stone wash / oscuro / claro / negro
+- Elasticidad: elastizado / rígido / semi-elastizado
+- Detalles: rotos / costuras decorativas / bolsillos / cinturón incluido / botones decorativos`;
+  } else if (category === 'vestido_falda') {
+    atributosEspecificos = `
+- Largo: mini / midi / maxi / hasta la rodilla
+- Silueta: recto / evasé / envolvente / ajustado / amplio / asimétrico
+- Tipo de escote: V / redondo / cuadrado / halter / off-shoulder / sin escote
+- Tipo de manga: sin manga / manga corta / manga larga / tirantes / off-shoulder
+- Tipo de tela: punto / gasa / lino / satén / algodón / encaje / crochet
+- Ocasión específica: casual diurno / cóctel / trabajo / fiesta / playa / boda invitada`;
+  }
+
+  const instruccion = `Analizá ${descripcionTexto && !atributosEspecificos ? 'la siguiente información' : 'esta imagen'} del producto "${nombre}" (categoría: ${categorias || 'indumentaria'}).
+
+Identificá con precisión los siguientes atributos:
+ATRIBUTOS ESPECÍFICOS:${atributosEspecificos || '\n- Tipo de prenda y características principales'}
+
+ATRIBUTOS GENERALES:${atributosGenerales}${textoContexto}
+
+Escribí una descripción densa en texto fluido que incluya todos los atributos identificados con sus valores exactos. Usá vocabulario de búsqueda directo (ej: "manga corta", "escote en V", "tiro alto", "wide leg", "color bordo", "tela de punto"). La descripción debe permitir encontrar este producto con búsquedas en lenguaje natural. Sin viñetas, sin saltos de línea, todo en un párrafo continuo.`;
+
+  return instruccion;
+}
+
+/**
+ * Usa GPT-4o Vision para analizar la imagen del producto y extraer atributos estructurados.
+ * Los atributos se adaptan según la categoría detectada (parte de arriba, pantalón, vestido/falda).
+ * La descripción resultante queda indexada para búsqueda en lenguaje natural.
  *
  * @param {string} imageUrl
  * @param {string} nombre
@@ -200,25 +283,20 @@ async function fetchVariations(productId) {
  * @returns {Promise<string>}
  */
 async function generateVisionDescription(imageUrl, nombre, categoria, descripcionTexto) {
-  // Contexto de texto: limitar para no pasarnos del límite de tokens
-  const textoContexto = descripcionTexto
-    ? `\n\nInformación adicional del producto (descripción de la tienda):\n${descripcionTexto.substring(0, 1500)}`
-    : '';
+  const garmentCategory = detectGarmentCategory(nombre, categoria);
+  const promptText = buildVisionPrompt(nombre, categoria, garmentCategory, descripcionTexto);
 
-  // Si no hay imagen, generamos descripción solo con el texto disponible
+  // Sin imagen: generar descripción solo con el texto disponible
   if (!imageUrl) {
     if (!descripcionTexto) {
       return `Producto: ${nombre}. Categoría: ${categoria || 'Sin categoría'}.`;
     }
-    // Sin imagen pero con descripción: usar GPT texto para resumir
     try {
       const response = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
-        messages: [{
-          role: 'user',
-          content: `Basándote en la siguiente descripción del producto "${nombre}" (categoría: ${categoria || 'sin especificar'}), generá una descripción concisa en español con los detalles más relevantes para un cliente: colores, materiales, talles disponibles, estilo y ocasión de uso. Una sola línea de texto fluido con keywords de búsqueda.${textoContexto}`,
-        }],
-        max_tokens: 200,
+        messages: [{ role: 'user', content: promptText }],
+        max_tokens: 400,
+        temperature: 0.3,
       });
       return response.choices[0]?.message?.content?.trim() || `Producto: ${nombre}`;
     } catch {
@@ -229,39 +307,22 @@ async function generateVisionDescription(imageUrl, nombre, categoria, descripcio
   try {
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: `Analizá esta imagen del producto "${nombre}" (categoría: ${categoria || 'sin especificar'}).
-
-Combiná lo que ves en la imagen con la información adicional de texto para generar una descripción completa en español que incluya:
-- Tipo exacto de prenda
-- Colores y tonos reales (sé específico: "verde tostado", "azul marino", "blanco hueso")
-- Material o textura (jean, lino, seda, algodón, punto, etc.)
-- Estilo (casual, formal, elegante, bohemio, etc.)
-- Detalles de diseño (mangas, cuello, escote, estampado, etc.)
-- Talles o tallas disponibles si aparecen en el texto (IMPORTANTE: incluirlos)
-- Ocasión de uso${textoContexto}
-
-Escribí todo en una sola línea de texto fluido con keywords de búsqueda. Sin viñetas ni saltos de línea.`,
-            },
-            {
-              type: 'image_url',
-              image_url: { url: imageUrl, detail: 'low' },
-            },
-          ],
-        },
-      ],
-      max_tokens: 250,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: promptText },
+          { type: 'image_url', image_url: { url: imageUrl, detail: 'low' } },
+        ],
+      }],
+      max_tokens: 400,
+      // Temperatura baja para extracción consistente de atributos (menos creatividad, más precisión)
+      temperature: 0.3,
     });
 
     return response.choices[0]?.message?.content?.trim() || `Producto: ${nombre}`;
   } catch (err) {
     console.warn(`[WooCommerce] Vision falló para "${nombre}": ${err.message}`);
-    return `Producto: ${nombre}.${textoContexto ? ' ' + descripcionTexto.substring(0, 200) : ''}`;
+    return `Producto: ${nombre}.${descripcionTexto ? ' ' + descripcionTexto.substring(0, 200) : ''}`;
   }
 }
 
@@ -570,4 +631,63 @@ export async function fetchOrdersByDateRange(after, before) {
 
   console.log(`[WooCommerce] Órdenes en rango: ${orders.length}`);
   return orders;
+}
+
+/**
+ * Regenera las descripciones Vision de productos activos usando el nuevo prompt estructurado.
+ * Útil para aplicar el formato de atributos a productos que ya estaban en la DB sin tener
+ * que esperar a que cambien sus imágenes.
+ *
+ * Procesa en batches con delay entre llamadas para respetar rate limits de OpenAI.
+ *
+ * @param {number} limit - Máximo de productos a procesar en esta ejecución
+ * @returns {Promise<{processed: number, failed: number}>}
+ */
+export async function regenerateVisionDescriptions(limit = 100) {
+  console.log(`[WooCommerce] Iniciando regeneración Vision para hasta ${limit} productos`);
+
+  const result = await query(
+    `SELECT id, nombre, categorias, imagen_url, descripcion_original
+     FROM waba_products
+     WHERE activo = true AND imagen_url IS NOT NULL
+     ORDER BY vision_generado_at ASC NULLS FIRST
+     LIMIT $1`,
+    [limit]
+  );
+
+  const productos = result.rows;
+  console.log(`[WooCommerce] Regeneración Vision: ${productos.length} productos a procesar`);
+
+  let processed = 0;
+  let failed = 0;
+
+  for (const p of productos) {
+    try {
+      const nuevaDesc = await generateVisionDescription(
+        p.imagen_url,
+        p.nombre,
+        p.categorias || '',
+        p.descripcion_original || ''
+      );
+
+      await query(
+        `UPDATE waba_products
+         SET descripcion_vision = $1, vision_generado_at = NOW(), updated_at = NOW()
+         WHERE id = $2`,
+        [nuevaDesc, p.id]
+      );
+
+      processed++;
+      console.log(`[WooCommerce] Vision regenerada → "${p.nombre}"`);
+    } catch (err) {
+      failed++;
+      console.warn(`[WooCommerce] Vision regeneration falló para "${p.nombre}": ${err.message}`);
+    }
+
+    // Delay entre llamadas para no saturar la API de OpenAI
+    await new Promise((r) => setTimeout(r, 400));
+  }
+
+  console.log(`[WooCommerce] Regeneración Vision completada — Procesados: ${processed}, Fallidos: ${failed}`);
+  return { processed, failed };
 }
