@@ -103,11 +103,11 @@ export default function Products() {
       const res = await fetch(`${API}/api/products/regenerate-vision`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ limit: 100 }),
+        body: JSON.stringify({}),
       });
       const data = await res.json();
       if (data.success) {
-        showToast('Regeneración iniciada — se procesa en background (hasta 100 productos). Refrescá en unos minutos.');
+        showToast('Regeneración iniciada — se procesa en background. Refrescá en unos minutos.');
       } else {
         showToast(data.error || 'Error al iniciar regeneración', 'error');
       }

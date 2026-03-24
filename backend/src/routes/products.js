@@ -230,12 +230,11 @@ router.post('/regenerate-vision', async (req, res) => {
     });
   }
 
-  // Aceptamos un límite opcional para no regenerar todo el catálogo de una vez
-  const limit = Math.min(500, Math.max(1, parseInt(req.body?.limit) || 100));
+  const limit = parseInt(req.body?.limit) || 9999;
 
   res.status(202).json({
     success: true,
-    message: `Regenerando descripciones Vision (hasta ${limit} productos). El proceso corre en background.`,
+    message: `Regenerando descripciones Vision (${limit === 9999 ? 'todos los' : `hasta ${limit}`} productos). El proceso corre en background.`,
   });
 
   // Ejecutar en background para no bloquear el request
