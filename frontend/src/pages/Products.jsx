@@ -12,6 +12,8 @@ import {
   Eye,
   ShoppingBag,
   Zap,
+  Ban,
+  RotateCcw,
 } from 'lucide-react';
 
 const API = import.meta.env.VITE_API_URL || '';
@@ -90,6 +92,30 @@ export default function Products() {
       showToast('Error al sincronizar', 'error');
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleExclude = async (product, exclude) => {
+    try {
+      const res = await fetch(`${API}/api/products/${product.id}/exclude`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ excluded: exclude }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(
+          exclude
+            ? `"${product.nombre}" excluido — no aparecerá en el bot ni en la tienda`
+            : `"${product.nombre}" re-incluido en el catálogo`
+        );
+        setSelectedProduct(null);
+        fetchProducts(pagination.page);
+      } else {
+        showToast(data.error || 'Error al actualizar el producto', 'error');
+      }
+    } catch {
+      showToast('Error de conexión', 'error');
     }
   };
 
@@ -329,7 +355,25 @@ export default function Products() {
               </div>
             )}
 
-            <div className="px-5 pb-5">
+            <div className="px-5 pb-5 space-y-2">
+              {/* Botón de exclusión manual */}
+              {selectedProduct.sync_excluded ? (
+                <button
+                  onClick={() => handleExclude(selectedProduct, false)}
+                  className="w-full py-2 rounded-lg text-sm bg-accent/10 border border-accent/20 text-accent hover:bg-accent/20 transition-all flex items-center justify-center gap-2"
+                >
+                  <RotateCcw size={14} />
+                  Re-incluir en el catálogo
+                </button>
+              ) : (
+                <button
+                  onClick={() => handleExclude(selectedProduct, true)}
+                  className="w-full py-2 rounded-lg text-sm bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-all flex items-center justify-center gap-2"
+                >
+                  <Ban size={14} />
+                  Excluir del bot y catálogo
+                </button>
+              )}
               <button
                 onClick={() => setSelectedProduct(null)}
                 className="w-full py-2 rounded-lg text-sm bg-white/5 border border-base-border text-gray-400 hover:text-white transition-all"

@@ -433,12 +433,19 @@ export async function syncProducts(forceFullSync = false) {
 
     // Ver si el producto ya existe en nuestra DB
     const existing = await query(
-      'SELECT id, imagen_url, descripcion_vision FROM waba_products WHERE woo_id = $1',
+      'SELECT id, imagen_url, descripcion_vision, sync_excluded FROM waba_products WHERE woo_id = $1',
       [woo.id]
     );
 
     const isNew          = existing.rows.length === 0;
     const imageChanged   = !isNew && existing.rows[0].imagen_url !== imagenUrl;
+
+    // Si el producto fue excluido manualmente, respetar esa decisión.
+    // La sync no puede re-activarlo aunque WooCommerce diga que tiene stock.
+    if (!isNew && existing.rows[0].sync_excluded === true) {
+      console.log(`[WooCommerce] Producto "${nombre}" excluido manualmente — saltando`);
+      continue;
+    }
     // Vision solo si el producto tiene stock — no procesamos imágenes de productos agotados
     const needsVision    = (isNew || imageChanged) && imagenUrl && activo;
 

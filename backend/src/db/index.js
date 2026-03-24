@@ -177,6 +177,15 @@ export async function initSchema() {
     console.warn('[DB] variantes migration warning:', err.message.split('\n')[0]);
   }
 
+  // 3b. Migración: columna sync_excluded — permite excluir manualmente productos de la sync
+  // Útil cuando WooCommerce reporta un producto como activo pero está físicamente agotado.
+  // La sync respeta este flag y no re-activa el producto aunque WooCommerce diga instock.
+  try {
+    await pool.query(`ALTER TABLE waba_products ADD COLUMN IF NOT EXISTS sync_excluded BOOLEAN DEFAULT false`);
+  } catch (err) {
+    console.warn('[DB] sync_excluded migration warning:', err.message.split('\n')[0]);
+  }
+
   // 4. Índices originales de performance
   try {
     await pool.query(`

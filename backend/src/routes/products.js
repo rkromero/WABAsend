@@ -37,7 +37,7 @@ router.get('/', async (req, res) => {
     const [dataResult, countResult] = await Promise.all([
       query(
         `SELECT id, woo_id, nombre, descripcion_vision, precio, precio_oferta,
-                stock, variantes, categorias, imagen_url, permalink, vision_generado_at, updated_at
+                stock, variantes, categorias, imagen_url, permalink, sync_excluded, vision_generado_at, updated_at
          FROM waba_products
          ${dataWhere}
          ORDER BY updated_at DESC
@@ -180,6 +180,41 @@ router.post('/sync', async (req, res) => {
     res.json({ success: true, data: result });
   } catch (err) {
     console.error('[Products] Error en sync manual:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PATCH /api/products/:id/exclude — excluye o re-incluye un producto manualmente
+// Cuando sync_excluded=true, la sync no puede re-activar el producto aunque WooCommerce diga instock.
+// Body: { excluded: true | false }
+router.patch('/:id/exclude', async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    return res.status(400).json({ success: false, error: 'ID inválido' });
+  }
+
+  const excluded = req.body?.excluded === true;
+
+  try {
+    const result = await query(
+      `UPDATE waba_products
+       SET sync_excluded = $1,
+           activo        = CASE WHEN $1 THEN false ELSE activo END,
+           updated_at    = NOW()
+       WHERE id = $2
+       RETURNING id, nombre, sync_excluded, activo`,
+      [excluded, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Producto no encontrado' });
+    }
+
+    const p = result.rows[0];
+    console.log(`[Products] Producto "${p.nombre}" — sync_excluded=${p.sync_excluded}`);
+    res.json({ success: true, data: p });
+  } catch (err) {
+    console.error('[Products] PATCH exclude error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
