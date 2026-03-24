@@ -559,6 +559,12 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
       .split(/\s+/)
       .filter((w) => w.length > 3);
 
+    // Extraer talles/tallas del mensaje original — pueden ser 1-2 chars (L, M, XL, XS, S, 42, etc.)
+    // y quedan filtrados por el criterio de longitud anterior.
+    // Los buscamos aparte solo en el campo variantes para no generar falsos positivos.
+    const tallesMatch = mensaje.match(/\b(XXL|XL|XS|[SML]{1,2}|\d{1,2})\b/gi) || [];
+    const talles = [...new Set(tallesMatch.map((t) => t.toUpperCase()))];
+
     if (words.length === 0) {
       // Sin keywords útiles → productos recientes como sugerencia
       const fallback = await query(
@@ -576,7 +582,10 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
     // Los resultados se ordenan por relevancia (más términos coinciden → mayor rank).
     // Esto es crítico para búsquedas de atributos como "manga corta" o "tiro alto".
     try {
-      const orTsQuery = words.join(' | ');
+      // Combinar palabras + talles para el OR query (FTS no aplica a talles cortos,
+      // pero los incluimos por si el diccionario los reconoce)
+      const allTerms = [...words, ...talles];
+      const orTsQuery = allTerms.join(' | ');
       const ftsorResult = await query(
         `SELECT ${PRODUCT_FIELDS},
                 ts_rank(
@@ -607,16 +616,34 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
     // Intento 3: fallback con ILIKE — máxima compatibilidad para términos no cubiertos por FTS.
     // Las condiciones se unen con OR: cualquier palabra del mensaje que aparezca en cualquier
     // campo devuelve el producto. Ordenado por match en el nombre (más probable).
-    const conditions = words
-      .map((_, i) => `(nombre ILIKE $${i + 2} OR descripcion_vision ILIKE $${i + 2} OR categorias ILIKE $${i + 2} OR variantes ILIKE $${i + 2})`)
-      .join(' OR ');
+    // Los talles detectados (L, M, XL, 1, 2, etc.) se buscan solo en variantes para evitar
+    // falsos positivos con palabras cortas en nombre o descripción.
+    const wordConditions = words.length > 0
+      ? words.map((_, i) => `(nombre ILIKE $${i + 2} OR descripcion_vision ILIKE $${i + 2} OR categorias ILIKE $${i + 2} OR variantes ILIKE $${i + 2})`)
+      : [];
+
+    const talleOffset = 2 + words.length;
+    const talleConditions = talles.map((_, i) =>
+      `variantes ILIKE $${talleOffset + i}`
+    );
+
+    const allConditions = [...wordConditions, ...talleConditions];
+
+    if (allConditions.length === 0) return [];
+
+    const combined = allConditions.join(' OR ');
+    const params = [
+      limit,
+      ...words.map((w) => `%${w}%`),
+      ...talles.map((t) => `%${t}%`),
+    ];
 
     const ilikeResult = await query(
       `SELECT ${PRODUCT_FIELDS} FROM waba_products
-       WHERE activo = true AND stock > 0 AND (${conditions})
+       WHERE activo = true AND stock > 0 AND (${combined})
        ORDER BY (nombre ILIKE $2) DESC, updated_at DESC
        LIMIT $1`,
-      [limit, ...words.map((w) => `%${w}%`)]
+      params
     );
 
     return ilikeResult.rows;
