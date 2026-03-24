@@ -170,15 +170,13 @@ export async function generateBotResponse(userMessage, conversationHistory = [])
   }
 
   // Buscar productos relevantes en el catálogo según el mensaje del usuario.
-  // Si no hay WooCommerce configurado, la lista queda vacía y el bot responde sin catálogo.
+  // Siempre se busca en waba_products (BD local), independientemente de si WooCommerce está conectado.
   let productosContext = '';
   try {
-    if (process.env.WOOCOMMERCE_URL) {
-      const products = await searchRelevantProducts(userMessage, 6);
-      productosContext = formatProductsForPrompt(products);
-      if (products.length > 0) {
-        console.log(`[Bot] ${products.length} producto(s) relevante(s) inyectados en el prompt`);
-      }
+    const products = await searchRelevantProducts(userMessage, 6);
+    productosContext = formatProductsForPrompt(products);
+    if (products.length > 0) {
+      console.log(`[Bot] ${products.length} producto(s) relevante(s) inyectados en el prompt`);
     }
   } catch (err) {
     // No cortamos el bot si falla la búsqueda de productos
@@ -196,7 +194,7 @@ export async function generateBotResponse(userMessage, conversationHistory = [])
       ...conversationHistory,
       { role: 'user', content: userMessage },
     ],
-    max_tokens: 500,
+    max_tokens: 800,
     temperature: 0.7,
   });
 

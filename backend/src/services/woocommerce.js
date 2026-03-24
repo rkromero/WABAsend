@@ -448,7 +448,39 @@ export async function syncProducts(forceFullSync = false) {
 export async function searchRelevantProducts(mensaje, limit = 6) {
   if (!mensaje || mensaje.trim().length === 0) return [];
 
+  const PRODUCT_FIELDS = `nombre, descripcion_vision, precio, precio_oferta, stock, variantes, categorias, permalink, imagen_url`;
+
   try {
+    // Intento 1: full-text search con diccionario español.
+    // plainto_tsquery convierte el mensaje en una query de texto completo con AND implícito,
+    // lo que maneja sinónimos, stopwords y variaciones morfológicas mejor que ILIKE.
+    // La columna de búsqueda combina nombre (peso A, más relevante) y descripcion_vision (peso B).
+    const ftsResult = await query(
+      `SELECT ${PRODUCT_FIELDS},
+              ts_rank(
+                setweight(to_tsvector('spanish', coalesce(nombre, '')), 'A') ||
+                setweight(to_tsvector('spanish', coalesce(descripcion_vision, '')), 'B') ||
+                setweight(to_tsvector('spanish', coalesce(categorias, '')), 'C'),
+                plainto_tsquery('spanish', $2)
+              ) AS rank
+       FROM waba_products
+       WHERE activo = true AND stock > 0
+         AND (
+           setweight(to_tsvector('spanish', coalesce(nombre, '')), 'A') ||
+           setweight(to_tsvector('spanish', coalesce(descripcion_vision, '')), 'B') ||
+           setweight(to_tsvector('spanish', coalesce(categorias, '')), 'C')
+         ) @@ plainto_tsquery('spanish', $2)
+       ORDER BY rank DESC
+       LIMIT $1`,
+      [limit, mensaje]
+    );
+
+    if (ftsResult.rows.length > 0) {
+      return ftsResult.rows;
+    }
+
+    // Intento 2: fallback con ILIKE para palabras de más de 3 caracteres.
+    // Se usa si el full-text no encontró nada (palabras muy cortas, nombres propios, etc.)
     const words = mensaje
       .toLowerCase()
       .replace(/[^a-záéíóúüñ\s]/gi, ' ')
@@ -456,37 +488,29 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
       .filter((w) => w.length > 3);
 
     if (words.length === 0) {
-      // Sin keywords útiles → devolver productos recientes como sugerencia
+      // Sin keywords útiles → productos recientes como sugerencia
       const fallback = await query(
-        `SELECT nombre, descripcion_vision, precio, precio_oferta, stock, categorias, permalink, imagen_url
-         FROM waba_products
+        `SELECT ${PRODUCT_FIELDS} FROM waba_products
          WHERE activo = true AND stock > 0
-         ORDER BY updated_at DESC
-         LIMIT $1`,
+         ORDER BY updated_at DESC LIMIT $1`,
         [limit]
       );
       return fallback.rows;
     }
 
-    const conditions = words.map((_, i) => `
-      (nombre             ILIKE $${i + 2}
-    OR descripcion_vision ILIKE $${i + 2}
-    OR categorias         ILIKE $${i + 2}
-    OR variantes          ILIKE $${i + 2})
-    `).join(' OR ');
+    const conditions = words
+      .map((_, i) => `(nombre ILIKE $${i + 2} OR descripcion_vision ILIKE $${i + 2} OR categorias ILIKE $${i + 2} OR variantes ILIKE $${i + 2})`)
+      .join(' OR ');
 
-    const params = [limit, ...words.map((w) => `%${w}%`)];
-
-    const result = await query(
-      `SELECT nombre, descripcion_vision, precio, precio_oferta, stock, variantes, categorias, permalink, imagen_url
-       FROM waba_products
+    const ilikeResult = await query(
+      `SELECT ${PRODUCT_FIELDS} FROM waba_products
        WHERE activo = true AND stock > 0 AND (${conditions})
        ORDER BY (nombre ILIKE $2) DESC, updated_at DESC
        LIMIT $1`,
-      params
+      [limit, ...words.map((w) => `%${w}%`)]
     );
 
-    return result.rows;
+    return ilikeResult.rows;
   } catch (err) {
     console.error('[WooCommerce] Error en búsqueda de productos:', err.message);
     return [];
