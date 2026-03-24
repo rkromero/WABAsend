@@ -352,10 +352,11 @@ export async function syncProducts(forceFullSync = false) {
       stock = woo.stock_quantity ?? (woo.stock_status === 'instock' ? 1 : 0);
     }
 
-    // Un producto está activo si:
-    // 1. Está publicado
+    // Un producto está activo si cumple TODAS las condiciones:
+    // 1. Está publicado en WooCommerce
     // 2. Tiene stock real > 0
-    // 3. Su visibilidad en el catálogo NO es 'hidden'
+    // 3. Es visible en el catálogo (no 'hidden')
+    // 4. Tiene imagen — sin imagen no se puede recomendar visualmente
     //
     // ⚠️ Para productos variables (con talles/colores), WooCommerce NO actualiza
     // el stock_status del producto padre cuando se agotan todas las variantes.
@@ -367,7 +368,7 @@ export async function syncProducts(forceFullSync = false) {
     const tieneStock = woo.type === 'variable'
       ? stock > 0
       : (woo.stock_status === 'instock' || stock > 0);
-    const activo = woo.status === 'publish' && tieneStock && catalogVisible;
+    const activo = woo.status === 'publish' && tieneStock && catalogVisible && !!imagenUrl;
 
     // Ver si el producto ya existe en nuestra DB
     const existing = await query(
