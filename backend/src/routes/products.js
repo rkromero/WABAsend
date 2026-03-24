@@ -22,8 +22,8 @@ router.get('/', async (req, res) => {
     // Construimos dos where clauses separados:
     // - dataWhere: para la query principal ($1=limit, $2=offset, $3=search)
     // - countWhere: para el conteo ($1=search) — no lleva limit/offset
-    let dataWhere  = 'WHERE activo = true';
-    let countWhere = 'WHERE activo = true';
+    let dataWhere  = 'WHERE activo = true AND stock > 0';
+    let countWhere = 'WHERE activo = true AND stock > 0';
     const dataParams  = [limit, offset];
     const countParams = [];
 

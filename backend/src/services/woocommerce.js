@@ -354,16 +354,20 @@ export async function syncProducts(forceFullSync = false) {
 
     // Un producto está activo si:
     // 1. Está publicado
-    // 2. Tiene stock (o es variable con stock_status instock)
+    // 2. Tiene stock real > 0
     // 3. Su visibilidad en el catálogo NO es 'hidden'
-    //    (hidden = oculto del catálogo y búsqueda, equivale a no disponible para el bot)
-    // Solo incluir productos visibles en tienda ('visible' o 'catalog')
-    // 'search' = solo en búsquedas internas del sitio → no aplica al bot
-    // 'hidden' = oculto de todo → definitivamente fuera
+    //
+    // ⚠️ Para productos variables (con talles/colores), WooCommerce NO actualiza
+    // el stock_status del producto padre cuando se agotan todas las variantes.
+    // El padre puede seguir mostrando stock_status='instock' aunque stock=0.
+    // Por eso para variables usamos SOLO el stock calculado desde las variantes.
+    // Para productos simples, mantenemos el fallback a stock_status por compatibilidad
+    // con tiendas que no gestionan stock por cantidad (manage_stock=false).
     const catalogVisible = ['visible', 'catalog'].includes(woo.catalog_visibility);
-    const activo = woo.status === 'publish'
-      && (woo.stock_status === 'instock' || stock > 0)
-      && catalogVisible;
+    const tieneStock = woo.type === 'variable'
+      ? stock > 0
+      : (woo.stock_status === 'instock' || stock > 0);
+    const activo = woo.status === 'publish' && tieneStock && catalogVisible;
 
     // Ver si el producto ya existe en nuestra DB
     const existing = await query(

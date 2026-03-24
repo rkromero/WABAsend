@@ -258,7 +258,7 @@ export async function sanitizeBotResponse(text) {
 
   try {
     const result = await query(
-      'SELECT permalink FROM waba_products WHERE permalink = ANY($1::text[]) AND activo = true',
+      'SELECT permalink FROM waba_products WHERE permalink = ANY($1::text[]) AND activo = true AND stock > 0',
       [urls]
     );
 
