@@ -381,6 +381,19 @@ export async function initSchema() {
     console.warn('[DB] idx_waba_aq_unique_order warning:', err.message.split('\n')[0]);
   }
 
+  // 6. Base de conocimiento del bot
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS waba_knowledge (
+      id         SERIAL PRIMARY KEY,
+      titulo     VARCHAR(255) NOT NULL,
+      tipo       VARCHAR(50)  NOT NULL DEFAULT 'info',
+      contenido  TEXT         NOT NULL,
+      activo     BOOLEAN      NOT NULL DEFAULT true,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+
   console.log('[DB] Esquema inicializado correctamente');
 }
 

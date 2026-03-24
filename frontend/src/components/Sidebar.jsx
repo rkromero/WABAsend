@@ -11,6 +11,7 @@ import {
   Bot,
   ShoppingBag,
   Zap,
+  BookOpen,
 } from 'lucide-react';
 
 const navItems = [
@@ -19,6 +20,7 @@ const navItems = [
   { to: '/automations', icon: Zap, label: 'Automatizaciones' },
   { to: '/inbox', icon: MessageSquare, label: 'Bandeja' },
   { to: '/bot', icon: Bot, label: 'Bot' },
+  { to: '/knowledge', icon: BookOpen, label: 'Conocimiento' },
   { to: '/products', icon: ShoppingBag, label: 'Productos' },
   { to: '/contacts', icon: Users, label: 'Contactos' },
   { to: '/templates', icon: FileText, label: 'Plantillas' },

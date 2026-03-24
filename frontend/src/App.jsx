@@ -11,6 +11,7 @@ import Inbox from './pages/Inbox.jsx';
 import Bot from './pages/Bot.jsx';
 import Products from './pages/Products.jsx';
 import Automations from './pages/Automations.jsx';
+import Knowledge from './pages/Knowledge.jsx';
 
 export default function App() {
   const location = useLocation();
@@ -37,6 +38,7 @@ export default function App() {
               <Route path="/bot" element={<Bot />} />
               <Route path="/products" element={<Products />} />
               <Route path="/automations" element={<Automations />} />
+              <Route path="/knowledge" element={<Knowledge />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </div>

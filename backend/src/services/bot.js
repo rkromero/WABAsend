@@ -18,6 +18,32 @@ import OpenAI from 'openai';
 import { query } from '../db/index.js';
 import { searchRelevantProducts } from './woocommerce.js';
 
+/**
+ * Carga todos los artículos activos de la base de conocimiento y los formatea
+ * como bloque de texto para inyectar en el system prompt del bot.
+ *
+ * @returns {Promise<string>} Bloque de texto o string vacío si no hay artículos
+ */
+async function getKnowledgeContext() {
+  try {
+    const result = await query(
+      `SELECT titulo, tipo, contenido
+       FROM waba_knowledge
+       WHERE activo = true
+       ORDER BY tipo ASC, titulo ASC`
+    );
+    if (result.rows.length === 0) return '';
+
+    const lines = result.rows.map(
+      (k) => `[${k.tipo.toUpperCase()}] ${k.titulo}:\n${k.contenido}`
+    );
+    return `\n\nINFORMACIÓN DE LA EMPRESA:\n${lines.join('\n\n')}`;
+  } catch (err) {
+    console.warn('[Bot] No se pudo cargar la base de conocimiento:', err.message);
+    return '';
+  }
+}
+
 // El cliente OpenAI toma la API key del entorno automáticamente (OPENAI_API_KEY)
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -183,8 +209,11 @@ export async function generateBotResponse(userMessage, conversationHistory = [])
     console.warn('[Bot] No se pudieron buscar productos:', err.message);
   }
 
-  // System prompt = instrucciones del usuario + productos disponibles
-  const systemPrompt = config.prompt + productosContext;
+  // Cargar base de conocimiento (políticas, FAQs, info de la empresa)
+  const knowledgeContext = await getKnowledgeContext();
+
+  // System prompt = instrucciones del usuario + conocimiento + productos disponibles
+  const systemPrompt = config.prompt + knowledgeContext + productosContext;
 
   const response = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
