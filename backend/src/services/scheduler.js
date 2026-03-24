@@ -13,7 +13,7 @@
 
 import cron from 'node-cron';
 import { query } from '../db/index.js';
-import { sendTemplateMessage, sleep } from './whatsapp.js';
+import { sendTemplateMessage, fetchTemplates, sleep } from './whatsapp.js';
 import { processAutomationQueue } from './automations.js';
 
 // Previene ejecuciones concurrentes del mismo scheduler
@@ -43,6 +43,23 @@ async function executeCampaign(campaign) {
   const logs = logsResult.rows;
   console.log(`[Scheduler] Campaña #${campaign.id}: ${logs.length} mensajes pendientes`);
 
+  // Detectar si la plantilla tiene variables ({{1}}) para no mandar parameters de más.
+  // Meta devuelve error #132000 si se envían parameters a una plantilla sin variables.
+  let hasVariables = true;
+  try {
+    const allTemplates = await fetchTemplates();
+    const tpl = allTemplates.find(
+      (t) => t.name === campaign.template_name && t.language === campaign.template_language
+    );
+    const bodyComp = tpl?.components?.find((c) => c.type === 'BODY');
+    hasVariables = bodyComp ? /\{\{\d+\}\}/.test(bodyComp.text || '') : false;
+    console.log(`[Scheduler] Plantilla "${campaign.template_name}" hasVariables=${hasVariables}`);
+  } catch (err) {
+    // Si no se puede verificar, asumir false para evitar el error #132000
+    hasVariables = false;
+    console.warn(`[Scheduler] No se pudo verificar variables de plantilla: ${err.message}. Asumiendo sin variables.`);
+  }
+
   let sentCount = 0;
   let failedCount = 0;
 
@@ -52,7 +69,8 @@ async function executeCampaign(campaign) {
         log.telefono,
         campaign.template_name,
         campaign.template_language,
-        log.nombre
+        log.nombre,
+        hasVariables
       );
 
       // Actualizar log con el ID de WhatsApp y estado sent

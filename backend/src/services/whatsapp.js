@@ -87,17 +87,24 @@ export async function createTemplate(templateData) {
 
 /**
  * Envía un mensaje de plantilla a un número de teléfono.
- * Reemplaza {{1}} con el nombre del cliente.
+ * Reemplaza {{1}} con el nombre del cliente solo si la plantilla tiene variables.
  *
- * @param {string} telefono         - Número en formato internacional (ej: 5491112345678)
- * @param {string} templateName     - Nombre exacto de la plantilla aprobada
- * @param {string} templateLanguage - Código de idioma (ej: es_AR, en_US)
- * @param {string} nombreCliente    - Valor para reemplazar {{1}} en la plantilla
+ * @param {string}  telefono         - Número en formato internacional (ej: 5491112345678)
+ * @param {string}  templateName     - Nombre exacto de la plantilla aprobada
+ * @param {string}  templateLanguage - Código de idioma (ej: es_AR, en_US)
+ * @param {string}  nombreCliente    - Valor para reemplazar {{1}} en la plantilla
+ * @param {boolean} hasVariables     - true si la plantilla usa {{1}}; false = no mandar parameters
  *
  * @returns {{ messageId: string }} ID del mensaje asignado por Meta
  */
-export async function sendTemplateMessage(telefono, templateName, templateLanguage, nombreCliente) {
+export async function sendTemplateMessage(telefono, templateName, templateLanguage, nombreCliente, hasVariables = true) {
   const { token, phoneNumberId } = await getConfig();
+
+  // Solo incluir components si la plantilla tiene variables ({{1}}, etc.)
+  // Si se mandan parameters a una plantilla sin variables, Meta devuelve error #132000
+  const templateComponents = hasVariables
+    ? [{ type: 'body', parameters: [{ type: 'text', text: nombreCliente }] }]
+    : [];
 
   const body = {
     messaging_product: 'whatsapp',
@@ -106,14 +113,7 @@ export async function sendTemplateMessage(telefono, templateName, templateLangua
     template: {
       name: templateName,
       language: { code: templateLanguage },
-      components: [
-        {
-          type: 'body',
-          parameters: [
-            { type: 'text', text: nombreCliente },
-          ],
-        },
-      ],
+      ...(templateComponents.length > 0 ? { components: templateComponents } : {}),
     },
   };
 
