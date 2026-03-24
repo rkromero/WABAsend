@@ -19,6 +19,7 @@ import {
 } from '../services/chatwoot.js';
 import { shouldBotRespond, generateBotResponse } from '../services/bot.js';
 import { sendFreeTextMessage } from '../services/whatsapp.js';
+import { getConversationHistory, saveConversationTurn } from '../services/conversationMemory.js';
 
 const router = Router();
 
@@ -141,19 +142,8 @@ async function processIncomingMessage({ telefono, nombre, messageText, waMessage
   try {
     const botActive = await shouldBotRespond(telefono);
     if (botActive) {
-      // Obtener historial reciente del mismo número para dar contexto al modelo
-      const historyResult = await query(
-        `SELECT message FROM incoming_messages
-         WHERE telefono = $1
-         ORDER BY created_at DESC
-         LIMIT 10`,
-        [telefono]
-      );
-
-      // Revertir para que estén en orden cronológico (más viejo primero)
-      const conversationHistory = historyResult.rows
-        .reverse()
-        .map((r) => ({ role: 'user', content: r.message }));
+      // Recuperar historial completo (user + assistant) de los últimos 24h / 20 mensajes
+      const conversationHistory = await getConversationHistory(telefono);
 
       const botResponse = await generateBotResponse(messageText, conversationHistory);
 
@@ -161,12 +151,14 @@ async function processIncomingMessage({ telefono, nombre, messageText, waMessage
       const botMessageId = await sendFreeTextMessage(telefono, botResponse);
       console.log(`[Bot] Mensaje enviado a ${telefono} — WA ID: ${botMessageId}`);
 
+      // Persistir el turno (user + assistant) en la memoria de conversación
+      await saveConversationTurn(telefono, messageText, botResponse);
+
       // Registrar la respuesta del bot en Chatwoot como mensaje saliente
       if (chatwootConversationId) {
         try {
           await sendMessageToConversation(chatwootConversationId, botResponse, 'outgoing');
         } catch (chatwootErr) {
-          // No bloqueamos si Chatwoot falla; la respuesta ya fue enviada por WhatsApp
           console.warn('[Bot] No se pudo registrar respuesta en Chatwoot:', chatwootErr.message);
         }
       }

@@ -381,7 +381,20 @@ export async function initSchema() {
     console.warn('[DB] idx_waba_aq_unique_order warning:', err.message.split('\n')[0]);
   }
 
-  // 6. Base de conocimiento del bot
+  // 6. Historial de conversaciones del bot (fallback PostgreSQL cuando no hay Redis)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS waba_bot_history (
+      id         SERIAL PRIMARY KEY,
+      telefono   VARCHAR(20) NOT NULL,
+      role       VARCHAR(10) NOT NULL,
+      content    TEXT        NOT NULL,
+      created_at TIMESTAMP   DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_waba_bot_history_telefono_created
+      ON waba_bot_history(telefono, created_at DESC);
+  `);
+
+  // 7. Base de conocimiento del bot
   await pool.query(`
     CREATE TABLE IF NOT EXISTS waba_knowledge (
       id         SERIAL PRIMARY KEY,
