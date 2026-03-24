@@ -552,8 +552,7 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
       return ftsResult.rows;
     }
 
-    // Intento 2: fallback con ILIKE para palabras de más de 3 caracteres.
-    // Se usa si el full-text no encontró nada (palabras muy cortas, nombres propios, etc.)
+    // Extraer palabras de búsqueda útiles (> 3 chars, sin puntuación)
     const words = mensaje
       .toLowerCase()
       .replace(/[^a-záéíóúüñ\s]/gi, ' ')
@@ -571,6 +570,43 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
       return fallback.rows;
     }
 
+    // Intento 2: FTS con OR entre los términos.
+    // Cuando el AND es demasiado estricto (ej: "remera manga corta" requiere las 3 palabras),
+    // el OR permite encontrar productos donde al menos uno de los términos esté presente.
+    // Los resultados se ordenan por relevancia (más términos coinciden → mayor rank).
+    // Esto es crítico para búsquedas de atributos como "manga corta" o "tiro alto".
+    try {
+      const orTsQuery = words.join(' | ');
+      const ftsorResult = await query(
+        `SELECT ${PRODUCT_FIELDS},
+                ts_rank(
+                  setweight(to_tsvector('spanish', coalesce(nombre, '')), 'A') ||
+                  setweight(to_tsvector('spanish', coalesce(descripcion_vision, '')), 'B') ||
+                  setweight(to_tsvector('spanish', coalesce(categorias, '')), 'C'),
+                  to_tsquery('spanish', $2)
+                ) AS rank
+         FROM waba_products
+         WHERE activo = true AND stock > 0
+           AND (
+             setweight(to_tsvector('spanish', coalesce(nombre, '')), 'A') ||
+             setweight(to_tsvector('spanish', coalesce(descripcion_vision, '')), 'B') ||
+             setweight(to_tsvector('spanish', coalesce(categorias, '')), 'C')
+           ) @@ to_tsquery('spanish', $2)
+         ORDER BY rank DESC
+         LIMIT $1`,
+        [limit, orTsQuery]
+      );
+
+      if (ftsorResult.rows.length > 0) {
+        return ftsorResult.rows;
+      }
+    } catch {
+      // Si el OR query falla (ej: palabras inválidas para el diccionario), continuar al ILIKE
+    }
+
+    // Intento 3: fallback con ILIKE — máxima compatibilidad para términos no cubiertos por FTS.
+    // Las condiciones se unen con OR: cualquier palabra del mensaje que aparezca en cualquier
+    // campo devuelve el producto. Ordenado por match en el nombre (más probable).
     const conditions = words
       .map((_, i) => `(nombre ILIKE $${i + 2} OR descripcion_vision ILIKE $${i + 2} OR categorias ILIKE $${i + 2} OR variantes ILIKE $${i + 2})`)
       .join(' OR ');
