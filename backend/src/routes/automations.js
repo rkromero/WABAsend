@@ -66,6 +66,81 @@ router.post('/', async (req, res) => {
   }
 });
 
+// ── Configuración de follow-up de conversaciones ──────────────────────────
+// IMPORTANTE: estas rutas deben estar ANTES de /:id para que Express no las
+// interprete como { id: 'followup' } y las mande al handler de automatizaciones.
+
+// GET /api/automations/followup — leer config + stats de envíos y conversiones
+router.get('/followup', async (req, res) => {
+  try {
+    const [config, sentStats, convStats] = await Promise.all([
+      getFollowupConfig(),
+      query(`
+        SELECT
+          COUNT(*) FILTER (WHERE status = 'sent')   AS sent_total,
+          COUNT(*) FILTER (WHERE status = 'failed') AS failed_total,
+          COUNT(*) FILTER (WHERE status = 'sent' AND sent_at > NOW() - INTERVAL '7 days') AS sent_last_7d
+        FROM waba_conversation_followups
+      `),
+      // La tabla waba_followup_conversions puede no existir todavía en instancias
+      // desplegadas antes de esta migración. El catch devuelve zeros seguros.
+      query(`
+        SELECT
+          COUNT(*)                                          AS total_conversions,
+          COALESCE(SUM(order_amount), 0)                    AS total_revenue,
+          COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS conversions_last_30d,
+          COALESCE(SUM(order_amount) FILTER (WHERE created_at > NOW() - INTERVAL '30 days'), 0) AS revenue_last_30d
+        FROM waba_followup_conversions
+      `).catch(() => ({ rows: [{ total_conversions: 0, total_revenue: 0, conversions_last_30d: 0, revenue_last_30d: 0 }] })),
+    ]);
+    res.json({
+      success: true,
+      data: {
+        config,
+        stats:       sentStats.rows[0],
+        conversions: convStats.rows[0],
+      },
+    });
+  } catch (err) {
+    console.error('[Followup] GET error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /api/automations/followup — guardar config
+router.put('/followup', async (req, res) => {
+  const { enabled, mensaje, cooldownDias } = req.body;
+
+  if (mensaje !== undefined && typeof mensaje !== 'string') {
+    return res.status(400).json({ success: false, error: 'mensaje debe ser texto' });
+  }
+  if (mensaje !== undefined && mensaje.trim().length === 0) {
+    return res.status(400).json({ success: false, error: 'El mensaje no puede estar vacío' });
+  }
+  if (cooldownDias !== undefined && (isNaN(parseInt(cooldownDias)) || parseInt(cooldownDias) < 1)) {
+    return res.status(400).json({ success: false, error: 'cooldownDias debe ser un número >= 1' });
+  }
+
+  try {
+    await saveFollowupConfig({ enabled, mensaje, cooldownDias });
+    const updated = await getFollowupConfig();
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    console.error('[Followup] PUT error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/automations/followup/process — forzar ciclo de follow-up (testing)
+router.post('/followup/process', async (req, res) => {
+  try {
+    await processFollowups();
+    res.json({ success: true, message: 'Ciclo de follow-up ejecutado' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // PUT /api/automations/:id — actualizar (incluyendo toggle activa)
 router.put('/:id', async (req, res) => {
   const { nombre, evento, delay_dias, template_name, template_language, activa } = req.body;
@@ -185,77 +260,6 @@ router.post('/process', async (req, res) => {
   try {
     await processAutomationQueue();
     res.json({ success: true, message: 'Cola procesada' });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ── Configuración de follow-up de conversaciones ──────────────────────────
-
-// GET /api/automations/followup — leer config + stats de envíos y conversiones
-router.get('/followup', async (req, res) => {
-  try {
-    const [config, sentStats, convStats] = await Promise.all([
-      getFollowupConfig(),
-      query(`
-        SELECT
-          COUNT(*) FILTER (WHERE status = 'sent')   AS sent_total,
-          COUNT(*) FILTER (WHERE status = 'failed') AS failed_total,
-          COUNT(*) FILTER (WHERE status = 'sent' AND sent_at > NOW() - INTERVAL '7 days') AS sent_last_7d
-        FROM waba_conversation_followups
-      `),
-      query(`
-        SELECT
-          COUNT(*)                                          AS total_conversions,
-          COALESCE(SUM(order_amount), 0)                    AS total_revenue,
-          COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS conversions_last_30d,
-          COALESCE(SUM(order_amount) FILTER (WHERE created_at > NOW() - INTERVAL '30 days'), 0) AS revenue_last_30d
-        FROM waba_followup_conversions
-      `),
-    ]);
-    res.json({
-      success: true,
-      data: {
-        config,
-        stats:       sentStats.rows[0],
-        conversions: convStats.rows[0],
-      },
-    });
-  } catch (err) {
-    console.error('[Followup] GET error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// PUT /api/automations/followup — guardar config
-router.put('/followup', async (req, res) => {
-  const { enabled, mensaje, cooldownDias } = req.body;
-
-  if (mensaje !== undefined && typeof mensaje !== 'string') {
-    return res.status(400).json({ success: false, error: 'mensaje debe ser texto' });
-  }
-  if (mensaje !== undefined && mensaje.trim().length === 0) {
-    return res.status(400).json({ success: false, error: 'El mensaje no puede estar vacío' });
-  }
-  if (cooldownDias !== undefined && (isNaN(parseInt(cooldownDias)) || parseInt(cooldownDias) < 1)) {
-    return res.status(400).json({ success: false, error: 'cooldownDias debe ser un número >= 1' });
-  }
-
-  try {
-    await saveFollowupConfig({ enabled, mensaje, cooldownDias });
-    const updated = await getFollowupConfig();
-    res.json({ success: true, data: updated });
-  } catch (err) {
-    console.error('[Followup] PUT error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// POST /api/automations/followup/process — forzar ciclo de follow-up (testing)
-router.post('/followup/process', async (req, res) => {
-  try {
-    await processFollowups();
-    res.json({ success: true, message: 'Ciclo de follow-up ejecutado' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

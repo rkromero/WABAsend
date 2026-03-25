@@ -430,18 +430,24 @@ export async function initSchema() {
   `);
 
   // 9. Conversiones atribuidas a follow-ups (ventana de 3 días)
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS waba_followup_conversions (
-      id           SERIAL PRIMARY KEY,
-      followup_id  INT REFERENCES waba_conversation_followups(id) ON DELETE SET NULL,
-      telefono     VARCHAR(20)   NOT NULL,
-      woo_order_id INT           NOT NULL UNIQUE,
-      order_amount DECIMAL(12,2),
-      created_at   TIMESTAMP     DEFAULT NOW()
-    );
-    CREATE INDEX IF NOT EXISTS idx_waba_followup_conv_created
-      ON waba_followup_conversions(created_at DESC);
-  `);
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS waba_followup_conversions (
+        id           SERIAL PRIMARY KEY,
+        followup_id  INT REFERENCES waba_conversation_followups(id) ON DELETE SET NULL,
+        telefono     VARCHAR(20)   NOT NULL,
+        woo_order_id INT           NOT NULL UNIQUE,
+        order_amount DECIMAL(12,2),
+        created_at   TIMESTAMP     DEFAULT NOW()
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_waba_followup_conv_created
+        ON waba_followup_conversions(created_at DESC)
+    `);
+  } catch (err) {
+    console.warn('[DB] waba_followup_conversions migration warning:', err.message.split('\n')[0]);
+  }
 
   console.log('[DB] Esquema inicializado correctamente');
 }
