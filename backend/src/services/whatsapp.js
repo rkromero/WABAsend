@@ -10,7 +10,7 @@
  */
 
 import axios from 'axios';
-import OpenAI from 'openai';
+import OpenAI, { toFile } from 'openai';
 import { query } from '../db/index.js';
 
 // La instancia de OpenAI se usa solo para Whisper — la clave viene del .env
@@ -220,19 +220,22 @@ export async function downloadMediaBuffer(mediaUrl) {
  * @returns {Promise<string|null>} Texto transcripto, o null si falla o está vacío
  */
 export async function transcribeAudio(buffer, mimeType) {
-  // Determinar extensión a partir del MIME type para que Whisper reconozca el formato
-  const ext = mimeType.includes('ogg')  ? 'ogg'  :
-              mimeType.includes('mp4')  ? 'm4a'  :
-              mimeType.includes('mpeg') ? 'mp3'  :
-              mimeType.includes('wav')  ? 'wav'  : 'ogg';
+  // Determinar extensión a partir del MIME type para que Whisper reconozca el formato.
+  // WhatsApp envía audios de voz como audio/ogg (con codec Opus).
+  const mime = mimeType || 'audio/ogg';
+  const ext  = mime.includes('ogg')  ? 'ogg'  :
+               mime.includes('mp4')  ? 'm4a'  :
+               mime.includes('mpeg') ? 'mp3'  :
+               mime.includes('wav')  ? 'wav'  : 'ogg';
 
-  // Node.js 18+ expone File globalmente — lo usamos para pasarle el buffer a la SDK de OpenAI
-  const file = new File([buffer], `audio.${ext}`, { type: mimeType });
+  // toFile() del SDK de OpenAI maneja la compatibilidad entre Node.js 18 y 20+,
+  // evitando problemas con el global `File` que solo existe en Node.js ≥ 20.
+  const file = await toFile(buffer, `audio.${ext}`, { type: mime });
 
   const response = await openai.audio.transcriptions.create({
     file,
     model: 'whisper-1',
-    language: 'es',  // Forzar español para mejor precisión en argentino
+    language: 'es',  // Forzar español para mayor precisión en argentino
   });
 
   const text = response.text?.trim() || null;

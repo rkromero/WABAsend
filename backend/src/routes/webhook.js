@@ -269,6 +269,19 @@ async function processIncomingMedia({ telefono, nombre, waMessageId, msg }) {
     }
   }
 
+  // ⚠️ Para audio: descargar el buffer INMEDIATAMENTE antes de que la URL expire.
+  // Meta expira los enlaces de descarga en ~5 minutos. Las operaciones de Chatwoot y DB
+  // que siguen pueden demorar, así que descargamos ahora mientras la URL es fresca.
+  let audioBuffer = null;
+  if (mediaType === 'audio' && mediaUrl) {
+    try {
+      audioBuffer = await downloadMediaBuffer(mediaUrl);
+      console.log(`[Webhook] Buffer de audio descargado — ${audioBuffer.length} bytes de ${telefono}`);
+    } catch (err) {
+      console.warn(`[Webhook] No se pudo descargar buffer de audio para ${telefono}:`, err.message);
+    }
+  }
+
   // Texto descriptivo para Chatwoot y trazabilidad
   const label = MEDIA_LABELS[mediaType] || mediaType;
   let messageText = caption ? `[${label}] ${caption}` : `[${label} recibido]`;
@@ -311,14 +324,12 @@ async function processIncomingMedia({ telefono, nombre, waMessageId, msg }) {
     let userText = null; // texto que se guardará en la memoria de conversación
 
     if (mediaType === 'audio') {
-      // Flujo Whisper: descargar buffer → transcribir → responder con IA
+      // Flujo Whisper: buffer ya descargado al inicio → transcribir → responder con IA
       // Fallback al acuse de recibo fijo si algo falla
       try {
-        if (!mediaUrl) throw new Error('Sin URL de media — no se puede descargar el audio');
+        if (!audioBuffer) throw new Error('Buffer de audio no disponible (URL expirada o error de descarga)');
 
-        const audioBuffer = await downloadMediaBuffer(mediaUrl);
         const mimeType = mediaData.mime_type || 'audio/ogg';
-
         const transcripcion = await transcribeAudio(audioBuffer, mimeType);
 
         if (!transcripcion) throw new Error('Transcripción vacía o en silencio');
