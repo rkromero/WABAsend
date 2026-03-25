@@ -493,12 +493,27 @@ async function processStatusUpdate(status) {
     return; // No retroceder el estado
   }
 
-  // Actualizar el log
+  // Extraer el mensaje de error de Meta cuando el estado es 'failed'.
+  // Meta incluye un array `errors` con código, título y detalle del fallo.
+  // Ejemplos comunes:
+  //   131026 — Fuera de la ventana de 24h (el destinatario no inició conversación recientemente)
+  //   131047 — Número no registrado en WhatsApp
+  //   130429 — Rate limit temporal de Meta
+  let errorMessage = null;
+  if (newStatus === 'failed' && status.errors?.length > 0) {
+    const metaErr = status.errors[0];
+    const details = metaErr.error_data?.details;
+    const base = `[${metaErr.code}] ${metaErr.title || metaErr.message || 'Error desconocido'}`;
+    errorMessage = details ? `${base}: ${details}` : base;
+    console.warn(`[Webhook] Mensaje ${waMessageId} fallido — ${errorMessage}`);
+  }
+
+  // Actualizar el log — COALESCE conserva un error previo si Meta no envió uno nuevo
   await query(
     `UPDATE waba_message_logs
-     SET status = $1, updated_at = NOW()
+     SET status = $1, error_message = COALESCE($3, error_message), updated_at = NOW()
      WHERE id = $2`,
-    [newStatus, log.id]
+    [newStatus, log.id, errorMessage]
   );
 
   // Actualizar contadores en la campaña
