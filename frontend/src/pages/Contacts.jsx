@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, Search, Trash2, Upload, ChevronLeft, ChevronRight, Tag, Edit2, Check, X, AlertTriangle, Wand2 } from 'lucide-react';
+import { Users, Search, Trash2, Upload, ChevronLeft, ChevronRight, Tag, Edit2, Check, X, AlertTriangle, Wand2, History, MessageSquare, Megaphone, Zap, ArrowDownLeft, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 import api from '../lib/api.js';
 import ExcelUploader from '../components/ExcelUploader.jsx';
@@ -20,6 +20,11 @@ export default function Contacts() {
   const [editingPhone, setEditingPhone] = useState(null); // id del contacto en edición
   const [phoneValue, setPhoneValue]     = useState('');
   const [savingPhone, setSavingPhone]   = useState(false);
+
+  // Historial por contacto
+  const [historyContact, setHistoryContact] = useState(null); // contacto seleccionado
+  const [history, setHistory]               = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const LIMIT = 20;
   const totalPages = Math.ceil(total / LIMIT);
@@ -137,6 +142,25 @@ export default function Contacts() {
   // Teléfono válido para WhatsApp: 549 + 10 dígitos (ej: 5491134866718)
   function isPhoneValid(tel) {
     return /^549\d{10}$/.test(tel);
+  }
+
+  async function openHistory(c) {
+    setHistoryContact(c);
+    setHistory([]);
+    setHistoryLoading(true);
+    try {
+      const r = await api.get(`/contacts/${c.telefono}/history`);
+      setHistory(r.data || []);
+    } catch (err) {
+      toast.error('No se pudo cargar el historial');
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  function closeHistory() {
+    setHistoryContact(null);
+    setHistory([]);
   }
 
   function segmentColor(seg) {
@@ -339,13 +363,22 @@ export default function Contacts() {
                       {format(new Date(c.created_at), 'dd MMM yyyy', { locale: es })}
                     </td>
                     <td className="py-3 px-5">
-                      <button
-                        onClick={() => handleDelete(c.id, c.nombre)}
-                        disabled={deleting === c.id}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity text-gray-600 hover:text-red-400"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => openHistory(c)}
+                          className="text-gray-600 hover:text-accent"
+                          title="Ver historial"
+                        >
+                          <History size={14} />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(c.id, c.nombre)}
+                          disabled={deleting === c.id}
+                          className="text-gray-600 hover:text-red-400"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -379,6 +412,152 @@ export default function Contacts() {
           </>
         )}
       </div>
+      {/* Drawer historial por contacto */}
+      {historyContact && (
+        <>
+          {/* Overlay */}
+          <div
+            className="fixed inset-0 bg-black/50 z-40"
+            onClick={closeHistory}
+          />
+          {/* Panel */}
+          <div className="fixed right-0 top-0 h-full w-full max-w-md bg-base-card border-l border-base-border z-50 flex flex-col shadow-2xl animate-slide-up">
+            {/* Header del drawer */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-base-border">
+              <div>
+                <p className="font-semibold text-white text-sm">{historyContact.nombre}</p>
+                <p className="text-xs text-gray-500 font-mono mt-0.5">{historyContact.telefono}</p>
+              </div>
+              <button onClick={closeHistory} className="text-gray-500 hover:text-white p-1">
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Contenido */}
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              {historyLoading ? (
+                <div className="flex items-center justify-center py-16 gap-3 text-gray-500">
+                  <Loader2 size={18} className="animate-spin" />
+                  <span className="text-sm">Cargando historial...</span>
+                </div>
+              ) : history.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 gap-3 text-gray-600">
+                  <History size={32} />
+                  <p className="text-sm">Sin interacciones registradas</p>
+                </div>
+              ) : (
+                <ol className="relative border-l border-base-border ml-3 space-y-0">
+                  {history.map((item, idx) => (
+                    <HistoryItem key={`${item.tipo}-${item.id}-${idx}`} item={item} />
+                  ))}
+                </ol>
+              )}
+            </div>
+
+            {/* Footer */}
+            {history.length > 0 && (
+              <div className="px-5 py-3 border-t border-base-border">
+                <p className="text-xs text-gray-600">{history.length} evento{history.length !== 1 ? 's' : ''} registrado{history.length !== 1 ? 's' : ''}</p>
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
+  );
+}
+
+/* ── Ítem de la timeline ───────────────────────────────────────────── */
+const TIPO_CONFIG = {
+  'campaña': {
+    icon: Megaphone,
+    color: 'text-accent',
+    bg: 'bg-accent/10 border-accent/20',
+    label: 'Campaña',
+  },
+  'follow-up': {
+    icon: Zap,
+    color: 'text-amber-400',
+    bg: 'bg-amber-400/10 border-amber-400/20',
+    label: 'Follow-up',
+  },
+  'automatización': {
+    icon: MessageSquare,
+    color: 'text-purple-400',
+    bg: 'bg-purple-400/10 border-purple-400/20',
+    label: 'Automatización',
+  },
+  'entrante': {
+    icon: ArrowDownLeft,
+    color: 'text-emerald-400',
+    bg: 'bg-emerald-400/10 border-emerald-400/20',
+    label: 'Recibido',
+  },
+};
+
+const STATUS_BADGE = {
+  'sent':      'text-blue-400 bg-blue-400/10',
+  'delivered': 'text-emerald-400 bg-emerald-400/10',
+  'read':      'text-accent bg-accent/10',
+  'failed':    'text-red-400 bg-red-400/10',
+  'pending':   'text-gray-400 bg-white/5',
+  'received':  'text-emerald-400 bg-emerald-400/10',
+};
+
+const STATUS_LABEL = {
+  'sent':      'Enviado',
+  'delivered': 'Entregado',
+  'read':      'Leído',
+  'failed':    'Fallido',
+  'pending':   'Pendiente',
+  'received':  'Recibido',
+};
+
+function HistoryItem({ item }) {
+  const conf = TIPO_CONFIG[item.tipo] || TIPO_CONFIG['campaña'];
+  const Icon = conf.icon;
+  const statusCls = STATUS_BADGE[item.status] || STATUS_BADGE['pending'];
+  const statusLabel = STATUS_LABEL[item.status] || item.status;
+
+  const fecha = new Date(item.fecha);
+  const fechaRelativa = formatDistanceToNow(fecha, { locale: es, addSuffix: true });
+  const fechaExacta  = format(fecha, "d MMM yyyy, HH:mm", { locale: es });
+
+  return (
+    <li className="mb-6 ml-6">
+      {/* Ícono en la línea */}
+      <span className={`absolute -left-3 flex h-6 w-6 items-center justify-center rounded-full border ${conf.bg}`}>
+        <Icon size={11} className={conf.color} />
+      </span>
+
+      <div className="glass-card p-3 space-y-1.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-gray-200 truncate">{item.titulo}</p>
+            {item.subtitulo && (
+              <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{item.subtitulo}</p>
+            )}
+          </div>
+          <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded font-medium ${statusCls}`}>
+            {statusLabel}
+          </span>
+        </div>
+
+        {item.detalle && item.status === 'failed' && (
+          <p className="text-[11px] text-red-400/80 bg-red-400/5 rounded px-2 py-1 line-clamp-2">
+            {item.detalle}
+          </p>
+        )}
+
+        <div className="flex items-center justify-between">
+          <span className={`text-[10px] px-1.5 py-0.5 rounded border ${conf.bg} ${conf.color} font-medium`}>
+            {conf.label}
+          </span>
+          <span className="text-[10px] text-gray-600" title={fechaExacta}>
+            {fechaRelativa}
+          </span>
+        </div>
+      </div>
+    </li>
   );
 }

@@ -297,4 +297,85 @@ router.delete('/', async (req, res) => {
   }
 });
 
+// GET /api/contacts/:telefono/history — historial cronológico de interacciones de un contacto
+// Une en una sola timeline: campañas salientes, follow-ups, automatizaciones y mensajes entrantes.
+router.get('/:telefono/history', async (req, res) => {
+  const telefono = String(req.params.telefono).replace(/\D/g, '');
+  if (!telefono || telefono.length < 10) {
+    return res.status(400).json({ success: false, error: 'Teléfono inválido' });
+  }
+
+  try {
+    const result = await query(
+      `SELECT *
+       FROM (
+         -- Campañas salientes (mensajes enviados como parte de una campaña)
+         SELECT
+           ml.id::TEXT            AS id,
+           'campaña'              AS tipo,
+           COALESCE(ml.sent_at, ml.updated_at) AS fecha,
+           c.nombre               AS titulo,
+           c.template_name        AS subtitulo,
+           ml.status              AS status,
+           ml.error_message       AS detalle
+         FROM waba_message_logs ml
+         JOIN waba_campaigns c ON c.id = ml.campaign_id
+         WHERE ml.telefono = $1
+           AND ml.sent_at IS NOT NULL
+
+         UNION ALL
+
+         -- Follow-ups de conversación (recordatorios antes de cerrar ventana 24h)
+         SELECT
+           f.id::TEXT             AS id,
+           'follow-up'            AS tipo,
+           f.sent_at              AS fecha,
+           'Follow-up enviado'    AS titulo,
+           NULL                   AS subtitulo,
+           f.status               AS status,
+           f.error_message        AS detalle
+         FROM waba_conversation_followups f
+         WHERE f.telefono = $1
+
+         UNION ALL
+
+         -- Automatizaciones (mensajes de flujos automáticos post-compra, etc.)
+         SELECT
+           aq.id::TEXT            AS id,
+           'automatización'       AS tipo,
+           COALESCE(aq.sent_at, aq.scheduled_for) AS fecha,
+           a.nombre               AS titulo,
+           a.template_name        AS subtitulo,
+           aq.status              AS status,
+           aq.error_message       AS detalle
+         FROM waba_automation_queue aq
+         JOIN waba_automations a ON a.id = aq.automation_id
+         WHERE aq.telefono = $1
+
+         UNION ALL
+
+         -- Mensajes entrantes (el contacto nos escribió)
+         SELECT
+           im.id::TEXT            AS id,
+           'entrante'             AS tipo,
+           im.created_at          AS fecha,
+           'Mensaje recibido'     AS titulo,
+           im.message             AS subtitulo,
+           'received'             AS status,
+           NULL                   AS detalle
+         FROM incoming_messages im
+         WHERE im.telefono = $1
+       ) AS historial
+       ORDER BY fecha DESC
+       LIMIT 200`,
+      [telefono]
+    );
+
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error('[Contacts] history error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 export default router;
