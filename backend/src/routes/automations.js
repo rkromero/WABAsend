@@ -141,6 +141,73 @@ router.post('/followup/process', async (req, res) => {
   }
 });
 
+// GET /api/automations/followup/preview — muestra los próximos follow-ups sin enviarlos
+// Útil para ver a quién le llegará el mensaje en las próximas horas.
+router.get('/followup/preview', async (req, res) => {
+  try {
+    const config = await getFollowupConfig();
+
+    // Candidatos YA en ventana (22h ± 30min) — se enviarían en el próximo ciclo del cron
+    const enVentana = await query(
+      `SELECT m.telefono,
+              MAX(m.created_at)                         AS last_message_at,
+              NOW() - MAX(m.created_at)                 AS antiguedad,
+              (MAX(m.created_at) + INTERVAL '22 hours') AS envio_estimado
+       FROM incoming_messages m
+       WHERE NOT EXISTS (
+         SELECT 1 FROM waba_conversation_followups f
+         WHERE f.telefono = m.telefono
+           AND f.sent_at > NOW() - ($1 || ' days')::INTERVAL
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM waba_conversation_overrides o
+         WHERE o.telefono = m.telefono AND o.bot_paused = true
+       )
+       GROUP BY m.telefono
+       HAVING MAX(m.created_at) BETWEEN NOW() - INTERVAL '22.5 hours'
+                                    AND NOW() - INTERVAL '21.5 hours'
+       ORDER BY last_message_at ASC`,
+      [config.cooldownDias]
+    );
+
+    // Próximos candidatos (entre 18h y 21.5h — llegarán a ventana en las próximas horas)
+    const proximos = await query(
+      `SELECT m.telefono,
+              MAX(m.created_at)                         AS last_message_at,
+              (MAX(m.created_at) + INTERVAL '22 hours') AS envio_estimado
+       FROM incoming_messages m
+       WHERE NOT EXISTS (
+         SELECT 1 FROM waba_conversation_followups f
+         WHERE f.telefono = m.telefono
+           AND f.sent_at > NOW() - ($1 || ' days')::INTERVAL
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM waba_conversation_overrides o
+         WHERE o.telefono = m.telefono AND o.bot_paused = true
+       )
+       GROUP BY m.telefono
+       HAVING MAX(m.created_at) BETWEEN NOW() - INTERVAL '21.5 hours'
+                                    AND NOW() - INTERVAL '18 hours'
+       ORDER BY last_message_at ASC
+       LIMIT 20`,
+      [config.cooldownDias]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        followup_enabled: config.enabled,
+        cooldown_dias:    config.cooldownDias,
+        en_ventana:       enVentana.rows,   // se envían en el próximo ciclo del cron
+        proximos:         proximos.rows,    // llegarán a ventana en las próximas horas
+      },
+    });
+  } catch (err) {
+    console.error('[Followup] Preview error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // PUT /api/automations/:id — actualizar (incluyendo toggle activa)
 router.put('/:id', async (req, res) => {
   const { nombre, evento, delay_dias, template_name, template_language, activa } = req.body;
