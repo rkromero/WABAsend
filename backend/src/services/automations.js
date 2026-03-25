@@ -13,7 +13,27 @@
  */
 
 import { query } from '../db/index.js';
-import { sendTemplateMessage, sleep } from './whatsapp.js';
+import { sendTemplateMessage, fetchTemplates, sleep } from './whatsapp.js';
+
+// Cache de templates para no llamar a Meta en cada mensaje de la cola
+let _templateCache = null;
+let _templateCacheAt = 0;
+
+async function getTemplateHasVariables(templateName, templateLanguage) {
+  const now = Date.now();
+  // Cache de 10 minutos para evitar llamadas repetidas a Meta
+  if (!_templateCache || now - _templateCacheAt > 10 * 60 * 1000) {
+    try {
+      _templateCache = await fetchTemplates();
+      _templateCacheAt = now;
+    } catch {
+      return true; // Si no podemos verificar, asumir que tiene variables (comportamiento anterior)
+    }
+  }
+  const tpl = _templateCache.find((t) => t.name === templateName && t.language === templateLanguage);
+  const body = tpl?.components?.find((c) => c.type === 'BODY');
+  return body ? /\{\{\d+\}\}/.test(body.text || '') : false;
+}
 
 /**
  * Normaliza un número de teléfono argentino al formato internacional 549XXXXXXXXXX
@@ -171,11 +191,17 @@ export async function processAutomationQueue() {
 
   for (const item of pendingResult.rows) {
     try {
+      // Automatizaciones usan {{1}} = nombre del cliente por convención.
+      // Verificamos si la plantilla realmente tiene variables para no enviar
+      // components vacíos (Meta devuelve error #132000 en ese caso).
+      const hasVars = await getTemplateHasVariables(item.template_name, item.template_language);
+      const parameterValues = hasVars ? [item.nombre_cliente || 'Cliente'] : [];
+
       const { messageId } = await sendTemplateMessage(
         item.telefono,
         item.template_name,
         item.template_language,
-        item.nombre_cliente || 'Cliente'
+        parameterValues
       );
 
       await query(

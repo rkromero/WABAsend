@@ -487,6 +487,13 @@ export async function initSchema() {
     console.warn('[DB] waba_followup_conversions migration warning:', err.message.split('\n')[0]);
   }
 
+  // Migración: variable_mapping para campañas con variables dinámicas en templates
+  try {
+    await pool.query(`ALTER TABLE waba_campaigns ADD COLUMN IF NOT EXISTS variable_mapping JSONB DEFAULT '{}'`);
+  } catch (err) {
+    console.warn('[DB] variable_mapping migration warning:', err.message.split('\n')[0]);
+  }
+
   // 11. Opt-outs — contactos que solicitaron no recibir más mensajes.
   //     Se excluyen de campañas, follow-ups y automatizaciones.
   try {

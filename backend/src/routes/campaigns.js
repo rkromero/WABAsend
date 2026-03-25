@@ -136,9 +136,9 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/campaigns — crear una nueva campaña
-// Body: { nombre, template_name, template_language, contact_ids, scheduled_at }
+// Body: { nombre, template_name, template_language, contact_ids, scheduled_at, variable_mapping? }
 router.post('/', async (req, res) => {
-  const { nombre, template_name, template_language, contact_ids, scheduled_at } = req.body;
+  const { nombre, template_name, template_language, contact_ids, scheduled_at, variable_mapping } = req.body;
 
   if (!nombre || !template_name || !template_language || !scheduled_at) {
     return res.status(400).json({
@@ -171,12 +171,13 @@ router.post('/', async (req, res) => {
 
     const contacts = contactsResult.rows;
 
-    // Crear la campaña
+    // Crear la campaña — guardar variable_mapping si fue provisto
+    const validMapping = (variable_mapping && typeof variable_mapping === 'object') ? variable_mapping : {};
     const campaignResult = await query(
-      `INSERT INTO waba_campaigns (nombre, template_name, template_language, scheduled_at, total_contacts)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO waba_campaigns (nombre, template_name, template_language, scheduled_at, total_contacts, variable_mapping)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [nombre.trim(), template_name, template_language, scheduledDate, contacts.length]
+      [nombre.trim(), template_name, template_language, scheduledDate, contacts.length, JSON.stringify(validMapping)]
     );
 
     const campaign = campaignResult.rows[0];

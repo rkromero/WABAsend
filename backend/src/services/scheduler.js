@@ -21,6 +21,36 @@ import { processFollowups } from './followup.js';
 let isRunning = false;
 
 /**
+ * Construye el array de valores de variables para un contacto dado,
+ * usando el variable_mapping de la campaña.
+ *
+ * variable_mapping = { "1": { source: "nombre" }, "2": { source: "fixed", value: "PROMO20" } }
+ * Fuentes disponibles: "nombre", "telefono", "email", "fixed"
+ * Fallback si no hay mapping: [nombre] para mantener compatibilidad con plantillas legacy.
+ *
+ * @param {Object} variableMapping - Mapping de la campaña
+ * @param {Object} log             - Fila de waba_message_logs con nombre, telefono, email
+ * @returns {string[]} Array de valores en orden numérico de variable
+ */
+function buildParameterValues(variableMapping, log) {
+  const keys = Object.keys(variableMapping || {});
+  if (keys.length === 0) {
+    // Legacy: plantilla con {{1}} pero sin mapping configurado → usar nombre
+    return [log.nombre || 'Cliente'];
+  }
+  return keys
+    .sort((a, b) => parseInt(a) - parseInt(b))
+    .map((key) => {
+      const m = variableMapping[key];
+      if (m.source === 'nombre')   return log.nombre   || 'Cliente';
+      if (m.source === 'telefono') return log.telefono || '';
+      if (m.source === 'email')    return log.email    || '';
+      if (m.source === 'fixed')    return m.value      || '';
+      return '';
+    });
+}
+
+/**
  * Ejecuta una campaña: envía mensajes a todos sus contactos.
  * Actualiza el estado de cada mensaje en waba_message_logs y los contadores en waba_campaigns.
  *
@@ -86,12 +116,17 @@ async function executeCampaign(campaign) {
 
   for (const log of logs) {
     try {
+      // Construir parámetros de variables según el mapping de la campaña.
+      // Si no tiene variables, pasar array vacío para que Meta no reciba components.
+      const parameterValues = hasVariables
+        ? buildParameterValues(campaign.variable_mapping || {}, log)
+        : [];
+
       const { messageId } = await sendTemplateMessage(
         log.telefono,
         campaign.template_name,
         campaign.template_language,
-        log.nombre,
-        hasVariables
+        parameterValues
       );
 
       // Actualizar log con el ID de WhatsApp y estado sent

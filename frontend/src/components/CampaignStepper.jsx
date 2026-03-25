@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Check, ChevronRight, Send } from 'lucide-react';
+import { Check, ChevronRight, Send, Eye } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../lib/api.js';
 
@@ -22,7 +22,37 @@ function Step1({ data, onChange }) {
   );
 }
 
-// ── Paso 2: Selección de plantilla ────────────────────────────────────────────
+// ── Helpers de variables ──────────────────────────────────────────────────────
+
+const SOURCE_OPTIONS = [
+  { value: 'nombre',   label: 'Nombre del contacto' },
+  { value: 'telefono', label: 'Teléfono' },
+  { value: 'email',    label: 'Email' },
+  { value: 'fixed',    label: 'Texto fijo (igual para todos)' },
+];
+
+const SOURCE_LABELS = { nombre: 'Nombre', telefono: 'Teléfono', email: 'Email' };
+
+const PREVIEW_CONTACT = { nombre: 'Ana García', telefono: '5491134866718', email: 'ana@ejemplo.com' };
+
+function extractVariables(bodyText) {
+  const matches = [...(bodyText || '').matchAll(/\{\{(\d+)\}\}/g)];
+  return [...new Set(matches.map((m) => m[1]))].sort((a, b) => parseInt(a) - parseInt(b));
+}
+
+function renderPreview(bodyText, mapping) {
+  return (bodyText || '').replace(/\{\{(\d+)\}\}/g, (_, n) => {
+    const m = mapping?.[n];
+    if (!m) return `{{${n}}}`;
+    if (m.source === 'nombre')   return PREVIEW_CONTACT.nombre;
+    if (m.source === 'telefono') return PREVIEW_CONTACT.telefono;
+    if (m.source === 'email')    return PREVIEW_CONTACT.email;
+    if (m.source === 'fixed')    return m.value || `{{${n}}}`;
+    return `{{${n}}}`;
+  });
+}
+
+// ── Paso 2: Selección de plantilla + mapeo de variables ───────────────────────
 function Step2({ data, onChange }) {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading]     = useState(true);
@@ -34,11 +64,41 @@ function Step2({ data, onChange }) {
       .finally(() => setLoading(false));
   }, []);
 
-  // Extraer el texto del body de la plantilla para el preview
   function getBodyText(template) {
     const body = template.components?.find((c) => c.type === 'BODY');
-    return body?.text || 'Sin preview disponible';
+    return body?.text || '';
   }
+
+  function handleSelectTemplate(t) {
+    const bodyText = getBodyText(t);
+    const vars = extractVariables(bodyText);
+    // Inicializar mapping con 'nombre' como default para cada variable
+    const defaultMapping = {};
+    vars.forEach((n) => { defaultMapping[n] = { source: 'nombre' }; });
+    onChange({
+      template_name: t.name,
+      template_language: t.language,
+      template_body_text: bodyText,
+      variable_mapping: defaultMapping,
+    });
+  }
+
+  function updateMapping(varNum, field, value) {
+    const mapping = { ...(data.variable_mapping || {}) };
+    if (field === 'source') {
+      mapping[varNum] = { source: value }; // reset value al cambiar source
+    } else {
+      mapping[varNum] = { ...(mapping[varNum] || { source: 'fixed' }), [field]: value };
+    }
+    onChange({ variable_mapping: mapping });
+  }
+
+  const selectedTemplate = templates.find(
+    (t) => t.name === data.template_name && t.language === data.template_language
+  );
+  const bodyText = selectedTemplate ? getBodyText(selectedTemplate) : (data.template_body_text || '');
+  const variables = extractVariables(bodyText);
+  const mapping = data.variable_mapping || {};
 
   if (loading) {
     return <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton h-16 rounded-lg" />)}</div>;
@@ -53,35 +113,94 @@ function Step2({ data, onChange }) {
   }
 
   return (
-    <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-      {templates.map((t) => {
-        const isSelected = data.template_name === t.name && data.template_language === t.language;
-        return (
-          <button
-            key={`${t.name}-${t.language}`}
-            onClick={() => onChange({ template_name: t.name, template_language: t.language })}
-            className={`w-full text-left p-4 rounded-lg border transition-all duration-150 ${
-              isSelected
-                ? 'border-accent bg-accent/8 text-white'
-                : 'border-base-border bg-base-elevated hover:border-white/20 text-gray-300'
-            }`}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <p className="font-medium text-sm">{t.name}</p>
-                <p className="text-xs text-gray-500 mt-1 line-clamp-2">
-                  {getBodyText(t)}
-                </p>
+    <div className="space-y-4">
+      {/* Lista de plantillas */}
+      <div className={`space-y-2 overflow-y-auto pr-1 ${variables.length > 0 ? 'max-h-44' : 'max-h-80'}`}>
+        {templates.map((t) => {
+          const isSelected = data.template_name === t.name && data.template_language === t.language;
+          const tVars = extractVariables(getBodyText(t));
+          return (
+            <button
+              key={`${t.name}-${t.language}`}
+              onClick={() => handleSelectTemplate(t)}
+              className={`w-full text-left p-4 rounded-lg border transition-all duration-150 ${
+                isSelected
+                  ? 'border-accent bg-accent/8 text-white'
+                  : 'border-base-border bg-base-elevated hover:border-white/20 text-gray-300'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-medium text-sm">{t.name}</p>
+                  <p className="text-xs text-gray-500 mt-1 line-clamp-2">
+                    {getBodyText(t) || 'Sin preview disponible'}
+                  </p>
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className="text-[10px] text-gray-500 bg-base-surface px-2 py-0.5 rounded-full">
+                    {t.language}
+                  </span>
+                  {tVars.length > 0 && (
+                    <span className="text-[10px] text-accent/70 bg-accent/10 px-2 py-0.5 rounded-full">
+                      {tVars.length} variable{tVars.length > 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="flex flex-col items-end gap-1 shrink-0">
-                <span className="text-[10px] text-gray-500 bg-base-surface px-2 py-0.5 rounded-full">
-                  {t.language}
-                </span>
-              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Configuración de variables — solo si el template seleccionado las tiene */}
+      {variables.length > 0 && (
+        <div className="border-t border-base-border pt-4 space-y-4">
+          <p className="text-[11px] text-gray-500 uppercase tracking-wider font-medium">
+            Mapear variables del mensaje
+          </p>
+
+          {/* Vista previa con los valores actuales */}
+          <div className="bg-base-elevated border border-accent/20 rounded-xl p-3">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Eye size={11} className="text-accent/60" />
+              <p className="text-[10px] text-gray-500">Vista previa (con datos de ejemplo)</p>
             </div>
-          </button>
-        );
-      })}
+            <p className="text-xs text-gray-200 whitespace-pre-wrap leading-relaxed">
+              {renderPreview(bodyText, mapping)}
+            </p>
+          </div>
+
+          {/* Fila por cada variable */}
+          {variables.map((varNum) => {
+            const m = mapping[varNum] || { source: 'nombre' };
+            return (
+              <div key={varNum} className="space-y-1.5">
+                <label className="text-xs text-gray-400">
+                  Variable <span className="font-mono text-accent">{`{{${varNum}}}`}</span>
+                </label>
+                <select
+                  value={m.source || 'nombre'}
+                  onChange={(e) => updateMapping(varNum, 'source', e.target.value)}
+                  className="input-field text-sm"
+                >
+                  {SOURCE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+                {m.source === 'fixed' && (
+                  <input
+                    type="text"
+                    placeholder="Texto que recibirán todos (ej: PROMO20)"
+                    value={m.value || ''}
+                    onChange={(e) => updateMapping(varNum, 'value', e.target.value)}
+                    className="input-field text-sm"
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -299,6 +418,14 @@ function Step5({ data }) {
     { label: 'Fecha programada', value: scheduledDate },
   ];
 
+  const mappingEntries = Object.entries(data.variable_mapping || {})
+    .sort(([a], [b]) => parseInt(a) - parseInt(b));
+
+  // Preview del mensaje con los valores configurados
+  const preview = data.template_body_text
+    ? renderPreview(data.template_body_text, data.variable_mapping || {})
+    : null;
+
   return (
     <div className="space-y-2">
       <p className="text-sm text-gray-400 mb-3">Revisá el resumen antes de confirmar:</p>
@@ -308,6 +435,31 @@ function Step5({ data }) {
           <span className="text-sm text-gray-200 font-medium">{value}</span>
         </div>
       ))}
+
+      {/* Variables configuradas */}
+      {mappingEntries.length > 0 && (
+        <div className="pt-2">
+          <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-1.5">Variables</p>
+          {mappingEntries.map(([n, m]) => (
+            <div key={n} className="flex justify-between py-1">
+              <span className="text-xs font-mono text-gray-500">{`{{${n}}}`}</span>
+              <span className="text-xs text-gray-300">
+                {m.source === 'fixed' ? `"${m.value || ''}"` : SOURCE_LABELS[m.source] || m.source}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Preview del mensaje */}
+      {preview && (
+        <div className="bg-base-elevated border border-accent/20 rounded-xl p-3 mt-1">
+          <p className="text-[10px] text-gray-500 mb-1.5 flex items-center gap-1">
+            <Eye size={10} className="text-accent/60" /> Mensaje de ejemplo
+          </p>
+          <p className="text-xs text-gray-200 whitespace-pre-wrap leading-relaxed">{preview}</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -317,6 +469,8 @@ const INITIAL_DATA = {
   nombre: '',
   template_name: '',
   template_language: '',
+  template_body_text: '',
+  variable_mapping: {},
   selectAll: true,
   contact_ids: [],
   scheduled_at: '',
@@ -359,6 +513,7 @@ export default function CampaignStepper({ onSuccess, onCancel }) {
         nombre: data.nombre.trim(),
         template_name: data.template_name,
         template_language: data.template_language,
+        variable_mapping: data.variable_mapping || {},
         contact_ids,
         scheduled_at: new Date(data.scheduled_at).toISOString(),
       });
