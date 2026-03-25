@@ -649,7 +649,9 @@ export default function Inbox() {
   async function fetchAllTags() {
     try {
       const res = await api.get('/inbox/tags');
-      setAllTags(res.data?.data || {});
+      // El interceptor de api.js ya unwrappea response.data, por lo que
+      // res = { success, data: {...} } → res.data es el objeto de tags directamente.
+      setAllTags(res.data || {});
     } catch { /* silencioso */ }
   }
 
