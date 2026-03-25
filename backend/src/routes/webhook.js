@@ -20,6 +20,7 @@ import {
 import { shouldBotRespond, generateBotResponse, sanitizeBotResponse } from '../services/bot.js';
 import { sendFreeTextMessage, getMediaUrl, downloadMediaBuffer, transcribeAudio } from '../services/whatsapp.js';
 import { getConversationHistory, saveConversationTurn } from '../services/conversationMemory.js';
+import { autoTagConversation } from '../services/autoTagger.js';
 
 const router = Router();
 
@@ -134,6 +135,9 @@ async function processIncomingMessage({ telefono, nombre, messageText, waMessage
 
     await sendMessageToConversation(conversation.id, messageText, 'incoming');
     console.log(`[Webhook] Mensaje entrante de ${telefono} sincronizado con Chatwoot (conv: ${conversation.id})`);
+
+    // Auto-etiquetado en background — fire-and-forget, nunca bloquea el webhook
+    autoTagConversation(chatwootConversationId, messageText).catch(() => {});
   } catch (err) {
     // No cortar el flujo si Chatwoot falla — igual guardamos el mensaje localmente
     console.warn('[Webhook] No se pudo sincronizar con Chatwoot:', err.message);
@@ -295,6 +299,9 @@ async function processIncomingMedia({ telefono, nombre, waMessageId, msg }) {
     chatwootConversationId = conversation.id;
     await sendMessageToConversation(conversation.id, messageText, 'incoming');
     console.log(`[Webhook] Media entrante de ${telefono} (${mediaType}) sincronizado con Chatwoot`);
+
+    // Auto-etiquetado para imágenes/documentos con caption — fire-and-forget
+    if (caption) autoTagConversation(chatwootConversationId, caption).catch(() => {});
   } catch (err) {
     console.warn('[Webhook] No se pudo sincronizar media con Chatwoot:', err.message);
   }
@@ -335,6 +342,9 @@ async function processIncomingMedia({ telefono, nombre, waMessageId, msg }) {
         if (!transcripcion) throw new Error('Transcripción vacía o en silencio');
 
         console.log(`[Whisper] Transcripción de ${telefono}: "${transcripcion}"`);
+
+        // Auto-etiquetado basado en el texto transcripto — fire-and-forget
+        if (chatwootConversationId) autoTagConversation(chatwootConversationId, transcripcion).catch(() => {});
 
         const conversationHistory = await getConversationHistory(telefono);
         const rawBotResponse = await generateBotResponse(transcripcion, conversationHistory, null);
