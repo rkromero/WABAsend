@@ -153,6 +153,39 @@ function MessageBubble({ message }) {
   );
 }
 
+// ─── Sonido de notificación (Web Audio API, sin archivo externo) ─────────────
+
+/**
+ * Reproduce un doble beep suave usando Web Audio API.
+ * No requiere ningún archivo de audio. Funciona en todos los browsers modernos.
+ * Los browsers bloquean el audio hasta la primera interacción del usuario
+ * con la página — después de eso funciona sin restricciones.
+ */
+function playNotificationSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+    function beep(startTime, freq = 880) {
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(0.18, startTime + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.18);
+      osc.start(startTime);
+      osc.stop(startTime + 0.18);
+    }
+
+    beep(ctx.currentTime,       880); // primer tono
+    beep(ctx.currentTime + 0.2, 1100); // segundo tono más agudo
+  } catch {
+    // Silencioso si el browser no soporta Web Audio API
+  }
+}
+
 // ─── Componente principal ───────────────────────────────────────────────────
 
 export default function Inbox() {
@@ -167,8 +200,12 @@ export default function Inbox() {
   const [botPaused, setBotPaused]             = useState(false);
   const [togglingBot, setTogglingBot]         = useState(false);
 
-  const messagesEndRef = useRef(null);
-  const inputRef       = useRef(null);
+  const messagesEndRef    = useRef(null);
+  const inputRef          = useRef(null);
+  // Ref para detectar nuevos mensajes sin re-renders: guarda el total de
+  // unread_count de la última vez que se cargaron las conversaciones.
+  // null = carga inicial (no reproducir sonido la primera vez).
+  const prevUnreadTotal   = useRef(null);
 
   // Conversación activa completa
   const activeConversation = conversations.find((c) => c.id === activeConvId) || null;
@@ -183,7 +220,19 @@ export default function Inbox() {
       const res = await api.get('/inbox/conversations?page=1');
       // Chatwoot devuelve { data: { payload: [...] } } o similar
       const payload = res.data?.payload || res.data || [];
-      setConversations(Array.isArray(payload) ? payload : []);
+      const convs = Array.isArray(payload) ? payload : [];
+
+      // Calcular el total de mensajes no leídos en esta carga
+      const unreadTotal = convs.reduce((sum, c) => sum + (parseInt(c.unread_count) || 0), 0);
+
+      // Si hay más unreads que antes → llegaron mensajes nuevos → reproducir sonido
+      // prevUnreadTotal.current === null significa que es la primera carga (no sonar)
+      if (prevUnreadTotal.current !== null && unreadTotal > prevUnreadTotal.current) {
+        playNotificationSound();
+      }
+      prevUnreadTotal.current = unreadTotal;
+
+      setConversations(convs);
     } catch (err) {
       if (loadingConvs) toast.error('Error al cargar conversaciones');
     } finally {
