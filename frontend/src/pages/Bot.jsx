@@ -1,15 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Bot as BotIcon, Save, Clock, Power, CheckCircle } from 'lucide-react';
+import { Bot as BotIcon, Save, Clock, Power, CheckCircle, Timer } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../lib/api.js';
 
 export default function Bot() {
   const [form, setForm] = useState({
-    BOT_ENABLED:          false,
-    BOT_PROMPT:           '',
-    BOT_SCHEDULE_ENABLED: false,
-    BOT_SCHEDULE_START:   '08:00',
-    BOT_SCHEDULE_END:     '20:00',
+    BOT_ENABLED:           false,
+    BOT_PROMPT:            '',
+    BOT_SCHEDULE_ENABLED:  false,
+    BOT_SCHEDULE_START:    '08:00',
+    BOT_SCHEDULE_END:      '20:00',
+    BOT_DEBOUNCE_SECONDS:  3,
   });
   const [loading, setLoading]  = useState(true);
   const [saving, setSaving]    = useState(false);
@@ -139,7 +140,43 @@ export default function Bot() {
             </div>
           </div>
 
-          {/* Sección 3: Horario de activación */}
+          {/* Sección 3: Espera para mensajes múltiples */}
+          <div className="glass-card p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <Timer size={16} className="text-accent" />
+              <h2 className="text-sm font-medium text-white">Espera para mensajes múltiples</h2>
+            </div>
+
+            <p className="text-xs text-gray-500">
+              Si el cliente escribe varios mensajes seguidos, el bot esperará este tiempo antes de responder — juntando todos los mensajes en una sola respuesta.
+            </p>
+
+            <div className="flex items-center gap-4">
+              <input
+                type="number"
+                min="0"
+                max="30"
+                className="input-field w-24 text-center"
+                value={form.BOT_DEBOUNCE_SECONDS}
+                onChange={(e) => {
+                  const val = Math.max(0, Math.min(30, parseInt(e.target.value || '0', 10)));
+                  update('BOT_DEBOUNCE_SECONDS', val);
+                }}
+              />
+              <span className="text-sm text-gray-400">
+                segundos{form.BOT_DEBOUNCE_SECONDS === 0 ? ' — responde inmediatamente' : ''}
+              </span>
+            </div>
+
+            {form.BOT_DEBOUNCE_SECONDS > 0 && (
+              <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg bg-accent/5 border border-accent/20 text-gray-400">
+                <Timer size={12} className="text-accent flex-shrink-0" />
+                El bot esperará hasta {form.BOT_DEBOUNCE_SECONDS}s sin recibir mensajes nuevos antes de responder.
+              </div>
+            )}
+          </div>
+
+          {/* Sección 4: Horario de activación */}
           <div className="glass-card p-6 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">

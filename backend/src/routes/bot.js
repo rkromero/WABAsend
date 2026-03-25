@@ -18,6 +18,7 @@ const BOT_KEYS = [
   'BOT_SCHEDULE_ENABLED',
   'BOT_SCHEDULE_START',
   'BOT_SCHEDULE_END',
+  'BOT_DEBOUNCE_SECONDS',
 ];
 
 // GET /api/bot — devuelve la configuración actual del bot desde la tabla config
@@ -35,11 +36,12 @@ router.get('/', async (req, res) => {
 
     // Normalizar a tipos correctos para el frontend
     const data = {
-      BOT_ENABLED:          config.BOT_ENABLED === 'true',
-      BOT_PROMPT:           config.BOT_PROMPT || '',
-      BOT_SCHEDULE_ENABLED: config.BOT_SCHEDULE_ENABLED === 'true',
-      BOT_SCHEDULE_START:   config.BOT_SCHEDULE_START || '08:00',
-      BOT_SCHEDULE_END:     config.BOT_SCHEDULE_END || '20:00',
+      BOT_ENABLED:           config.BOT_ENABLED === 'true',
+      BOT_PROMPT:            config.BOT_PROMPT || '',
+      BOT_SCHEDULE_ENABLED:  config.BOT_SCHEDULE_ENABLED === 'true',
+      BOT_SCHEDULE_START:    config.BOT_SCHEDULE_START || '08:00',
+      BOT_SCHEDULE_END:      config.BOT_SCHEDULE_END || '20:00',
+      BOT_DEBOUNCE_SECONDS:  parseInt(config.BOT_DEBOUNCE_SECONDS ?? '3', 10),
     };
 
     res.json({ success: true, data });

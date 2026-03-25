@@ -21,8 +21,33 @@ import { shouldBotRespond, generateBotResponse, sanitizeBotResponse } from '../s
 import { sendFreeTextMessage, getMediaUrl, downloadMediaBuffer, transcribeAudio } from '../services/whatsapp.js';
 import { getConversationHistory, saveConversationTurn } from '../services/conversationMemory.js';
 import { autoTagConversation } from '../services/autoTagger.js';
+import { scheduleDebounce } from '../services/messageDebounce.js';
 
 const router = Router();
+
+// ── Cache del tiempo de debounce ──────────────────────────────────────────────
+// Evita consultar la DB en cada mensaje entrante. Se refresca cada 10 segundos,
+// lo que significa que un cambio de configuración tarda máximo 10s en aplicarse.
+let _cachedDebounceMs = null;
+let _debounceConfigFetchedAt = 0;
+const DEBOUNCE_CONFIG_CACHE_TTL = 10_000; // 10 segundos
+
+async function getDebounceWindowMs() {
+  const now = Date.now();
+  if (_cachedDebounceMs !== null && (now - _debounceConfigFetchedAt) < DEBOUNCE_CONFIG_CACHE_TTL) {
+    return _cachedDebounceMs;
+  }
+  try {
+    const r = await query("SELECT value FROM config WHERE key = 'BOT_DEBOUNCE_SECONDS'");
+    const secs = parseInt(r.rows[0]?.value ?? '3', 10);
+    // Clampear entre 0 y 30 segundos para evitar valores absurdos
+    _cachedDebounceMs = Math.max(0, Math.min(30, secs)) * 1000;
+  } catch {
+    _cachedDebounceMs = 3000; // fallback seguro: 3 segundos
+  }
+  _debounceConfigFetchedAt = now;
+  return _cachedDebounceMs;
+}
 
 // GET /webhook — verificación del webhook por Meta
 // Meta llama a este endpoint cuando se registra el webhook en el panel
@@ -173,59 +198,87 @@ async function processIncomingMessage({ telefono, nombre, messageText, waMessage
     return; // No pasar por el bot
   }
 
-  // --- Bot de IA: responder automáticamente si está habilitado ---
-  // Nota: solo respondemos a mensajes reales de usuarios, nunca en loop.
-  // El flag `bot_reply` en incoming_messages evita que una respuesta del bot
-  // vuelva a disparar el bot (las respuestas del bot no se envían al webhook).
+  // --- Bot de IA: encolar en el debounce para esperar mensajes adicionales ---
+  // Si el usuario envía varios mensajes seguidos, el bot espera la ventana configurada
+  // antes de responder, acumulando todos los textos en una sola respuesta.
+  try {
+    const windowMs = await getDebounceWindowMs();
+    await scheduleDebounce({
+      telefono,
+      messageData: { telefono, nombre, messageText, chatwootConversationId },
+      windowMs,
+      onFlush: handleBotFlush,
+    });
+  } catch (debounceErr) {
+    console.error('[Webhook] Error al encolar mensaje en debounce:', debounceErr.message);
+  }
+}
+
+/**
+ * Procesa la respuesta del bot para los mensajes acumulados durante la ventana de debounce.
+ * Se llama automáticamente cuando vence el timer, con todos los textos del usuario juntos.
+ *
+ * @param {Array<{telefono: string, nombre: string, messageText: string, chatwootConversationId: number|null}>} messages
+ */
+async function handleBotFlush(messages) {
+  const { telefono, chatwootConversationId } = messages[0];
+
+  // Combinar todos los mensajes acumulados con saltos de línea.
+  // Ej: ["Hola", "necesito info", "del jean negro"] → "Hola\nnecesito info\ndel jean negro"
+  const combinedText = messages.map((m) => m.messageText).join('\n');
+
+  if (messages.length > 1) {
+    console.log(`[Bot] Debounce: ${messages.length} mensajes de ${telefono} combinados → "${combinedText.substring(0, 100)}"`);
+  }
+
   try {
     const botActive = await shouldBotRespond(telefono);
-    if (botActive) {
-      // Recuperar historial completo (user + assistant) de los últimos 24h / 20 mensajes
-      const conversationHistory = await getConversationHistory(telefono);
+    if (!botActive) return;
 
-      // Verificar si la persona está respondiendo a una campaña saliente reciente.
-      // Si existe una ventana activa (enviada en las últimas 48h), inyectamos el contexto
-      // de esa campaña en el prompt para que el bot responda en la línea correcta.
-      let campaignContext = null;
-      try {
-        const cwResult = await query(
-          `SELECT campaign_nombre, template_body
-           FROM waba_campaign_reply_window
-           WHERE telefono = $1 AND expires_at > NOW()
-           ORDER BY sent_at DESC
-           LIMIT 1`,
-          [telefono]
-        );
-        if (cwResult.rows.length > 0) {
-          const row = cwResult.rows[0];
-          campaignContext = { campaignNombre: row.campaign_nombre, templateBody: row.template_body };
-          console.log(`[Bot] Contexto de campaña detectado para ${telefono}: "${row.campaign_nombre}"`);
-        }
-      } catch (cwErr) {
-        // No crítico — el bot funciona sin contexto de campaña
-        console.warn('[Bot] No se pudo consultar contexto de campaña:', cwErr.message);
+    // Recuperar historial completo (user + assistant) de los últimos 24h / 20 mensajes
+    const conversationHistory = await getConversationHistory(telefono);
+
+    // Verificar si la persona está respondiendo a una campaña saliente reciente.
+    // Si existe una ventana activa (enviada en las últimas 48h), inyectamos el contexto
+    // de esa campaña en el prompt para que el bot responda en la línea correcta.
+    let campaignContext = null;
+    try {
+      const cwResult = await query(
+        `SELECT campaign_nombre, template_body
+         FROM waba_campaign_reply_window
+         WHERE telefono = $1 AND expires_at > NOW()
+         ORDER BY sent_at DESC
+         LIMIT 1`,
+        [telefono]
+      );
+      if (cwResult.rows.length > 0) {
+        const row = cwResult.rows[0];
+        campaignContext = { campaignNombre: row.campaign_nombre, templateBody: row.template_body };
+        console.log(`[Bot] Contexto de campaña detectado para ${telefono}: "${row.campaign_nombre}"`);
       }
+    } catch (cwErr) {
+      // No crítico — el bot funciona sin contexto de campaña
+      console.warn('[Bot] No se pudo consultar contexto de campaña:', cwErr.message);
+    }
 
-      const rawBotResponse = await generateBotResponse(messageText, conversationHistory, campaignContext);
+    const rawBotResponse = await generateBotResponse(combinedText, conversationHistory, campaignContext);
 
-      // Validar que ninguna URL de la respuesta sea una alucinación:
-      // si el bot inventó un permalink que no existe en el catálogo, reemplazamos la respuesta.
-      const botResponse = await sanitizeBotResponse(rawBotResponse);
+    // Validar que ninguna URL de la respuesta sea una alucinación
+    const botResponse = await sanitizeBotResponse(rawBotResponse);
 
-      // Enviar respuesta por WhatsApp (solo funciona en ventana de 24h)
-      const botMessageId = await sendFreeTextMessage(telefono, botResponse);
-      console.log(`[Bot] Mensaje enviado a ${telefono} — WA ID: ${botMessageId}`);
+    // Enviar respuesta por WhatsApp (solo funciona en ventana de 24h)
+    const botMessageId = await sendFreeTextMessage(telefono, botResponse);
+    console.log(`[Bot] Respuesta enviada a ${telefono} — WA ID: ${botMessageId}`);
 
-      // Persistir el turno (user + assistant) en la memoria de conversación
-      await saveConversationTurn(telefono, messageText, botResponse);
+    // Persistir el turno (texto combinado + respuesta del bot) en la memoria de conversación
+    await saveConversationTurn(telefono, combinedText, botResponse);
 
-      // Registrar la respuesta del bot en Chatwoot como mensaje saliente
-      if (chatwootConversationId) {
-        try {
-          await sendMessageToConversation(chatwootConversationId, botResponse, 'outgoing');
-        } catch (chatwootErr) {
-          console.warn('[Bot] No se pudo registrar respuesta en Chatwoot:', chatwootErr.message);
-        }
+    // Registrar la respuesta del bot en Chatwoot como mensaje saliente
+    if (chatwootConversationId) {
+      try {
+        await sendMessageToConversation(chatwootConversationId, botResponse, 'outgoing');
+      } catch (chatwootErr) {
+        console.warn('[Bot] No se pudo registrar respuesta en Chatwoot:', chatwootErr.message);
       }
     }
   } catch (botErr) {
