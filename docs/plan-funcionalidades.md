@@ -1,5 +1,5 @@
 # Plan de funcionalidades — Enviador WABA
-Última actualización: 2026-03-24
+Última actualización: 2026-03-24 · Próxima: Fase 4 — Mensajes multimedia
 
 ---
 
@@ -8,7 +8,7 @@
 ```
 ✅ Fase 1 — Opt-out automático        (completado 2026-03-24 · commit 779ad03)
 ✅ Fase 2 — Variables en templates    (completado 2026-03-24 · commit d05b7c2)
-✅ Fase 3 — Historial por contacto    (completado 2026-03-24)
+✅ Fase 3 — Historial por contacto    (completado 2026-03-24 · commit 5cdd288)
 ⬜ Fase 4 — Mensajes multimedia
 ⬜ Fase 5 — Etiquetas en conversas
 ⬜ Fase 6 — Carrito abandonado
@@ -48,7 +48,7 @@
 ---
 
 ## ✅ Fase 3 — Historial de envíos por contacto
-**Completado:** 2026-03-24
+**Completado:** 2026-03-24 · commit `5cdd288`
 
 ### Qué se hizo
 - Endpoint `GET /api/contacts/:telefono/history` en `contacts.js`
