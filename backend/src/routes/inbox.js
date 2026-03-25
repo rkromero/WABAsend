@@ -9,10 +9,17 @@
  */
 
 import { Router } from 'express';
+import multer from 'multer';
 import { getConversations, getMessages, sendMessageToConversation, getConversation, markConversationAsRead } from '../services/chatwoot.js';
-import { getConfig } from '../services/whatsapp.js';
+import { getConfig, uploadMediaToMeta, sendMediaMessage } from '../services/whatsapp.js';
 import { query } from '../db/index.js';
 import axios from 'axios';
+
+// Multer en memoria — archivos de hasta 16 MB (límite de WhatsApp para video/audio)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 16 * 1024 * 1024 },
+});
 
 const router = Router();
 
@@ -224,6 +231,79 @@ router.post('/conversations/:id/release', async (req, res) => {
     res.json({ success: true, data: { bot_paused: false, telefono } });
   } catch (err) {
     console.error('[Inbox] release error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/inbox/conversations/:id/media — enviar imagen o documento al cliente
+// Body: multipart/form-data con campo 'file' (archivo) y 'caption' (texto opcional)
+router.post('/conversations/:id/media', upload.single('file'), async (req, res) => {
+  const conversationId = parseInt(req.params.id);
+  if (isNaN(conversationId)) {
+    return res.status(400).json({ success: false, error: 'ID de conversación inválido' });
+  }
+
+  if (!req.file) {
+    return res.status(400).json({ success: false, error: 'No se recibió ningún archivo' });
+  }
+
+  const { buffer, mimetype, originalname, size } = req.file;
+  const caption = String(req.body.caption || '').trim();
+
+  // Determinar el tipo de media que Meta espera según el MIME type
+  const mediaType = mimetype.startsWith('image/')
+    ? 'image'
+    : mimetype.startsWith('video/')
+    ? 'video'
+    : mimetype.startsWith('audio/')
+    ? 'audio'
+    : 'document';
+
+  try {
+    // Obtener teléfono del contacto en la conversación
+    const conversation = await getConversation(conversationId);
+    const telefono = conversation.meta?.sender?.phone_number?.replace(/^\+/, '');
+
+    if (!telefono) {
+      return res.status(400).json({
+        success: false,
+        error: 'No se pudo obtener el teléfono del contacto desde Chatwoot',
+      });
+    }
+
+    // 1. Subir el archivo a la API de media de Meta → obtener media_id
+    const mediaId = await uploadMediaToMeta(buffer, mimetype, originalname);
+    console.log(`[Inbox] Archivo subido a Meta — mediaId: ${mediaId} (${originalname}, ${size} bytes)`);
+
+    // 2. Enviar el mensaje multimedia por WhatsApp
+    let waMessageId = null;
+    try {
+      waMessageId = await sendMediaMessage(telefono, mediaType, mediaId, caption, originalname);
+      console.log(`[Inbox] Media enviado por WhatsApp a ${telefono} (msgId: ${waMessageId})`);
+    } catch (waErr) {
+      const waError = waErr.response?.data?.error?.message || waErr.message;
+      console.warn(`[Inbox] WhatsApp media send falló para ${telefono}: ${waError}`);
+      // No cortamos el flujo: registramos en Chatwoot de todos modos
+    }
+
+    // 3. Registrar en Chatwoot como mensaje saliente (texto descriptivo + caption si hay)
+    const typeLabel = { image: 'Imagen', video: 'Video', audio: 'Audio', document: 'Documento' }[mediaType];
+    const chatwootText = caption
+      ? `[${typeLabel}: ${originalname}] ${caption}`
+      : `[${typeLabel} enviado: ${originalname}]`;
+    const chatwootMsg = await sendMessageToConversation(conversationId, chatwootText, 'outgoing');
+
+    res.json({
+      success: true,
+      data: {
+        chatwoot_message_id: chatwootMsg.id,
+        whatsapp_message_id: waMessageId,
+        media_id: mediaId,
+        media_type: mediaType,
+      },
+    });
+  } catch (err) {
+    console.error('[Inbox] POST media error:', err.response?.data || err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });

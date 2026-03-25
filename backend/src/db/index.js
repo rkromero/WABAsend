@@ -494,6 +494,16 @@ export async function initSchema() {
     console.warn('[DB] variable_mapping migration warning:', err.message.split('\n')[0]);
   }
 
+  // Migración: soporte de mensajes multimedia entrantes (fase 4)
+  // media_type: 'image' | 'video' | 'document' | 'audio'
+  // media_url: URL temporal de descarga provista por Meta (expira ~5 min; se usa para referencia)
+  try {
+    await pool.query(`ALTER TABLE incoming_messages ADD COLUMN IF NOT EXISTS media_type VARCHAR(20)`);
+    await pool.query(`ALTER TABLE incoming_messages ADD COLUMN IF NOT EXISTS media_url TEXT`);
+  } catch (err) {
+    console.warn('[DB] media columns migration warning:', err.message.split('\n')[0]);
+  }
+
   // 11. Opt-outs — contactos que solicitaron no recibir más mensajes.
   //     Se excluyen de campañas, follow-ups y automatizaciones.
   try {

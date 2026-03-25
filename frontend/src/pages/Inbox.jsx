@@ -22,6 +22,11 @@ import {
   Plus,
   Pencil,
   Trash2,
+  Paperclip,
+  FileText,
+  Film,
+  Music,
+  Image as ImageIcon,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format, formatDistanceToNow, parseISO } from 'date-fns';
@@ -132,13 +137,74 @@ function ConversationItem({ conversation, isActive, onClick }) {
   );
 }
 
-/** Burbuja de mensaje individual */
+/** Renderiza un adjunto de Chatwoot (imagen, video, audio, documento) */
+function AttachmentRenderer({ attachment, isOutgoing }) {
+  const fileType = attachment.file_type || '';
+  const url = attachment.data_url || attachment.file_path || '';
+  const name = attachment.name || 'archivo';
+
+  if (!url) return null;
+
+  if (fileType === 'image' || attachment.content_type?.startsWith('image/')) {
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer" className="block">
+        <img
+          src={url}
+          alt={name}
+          className="max-w-full rounded-xl max-h-64 object-cover border border-white/10"
+          onError={(e) => { e.target.style.display = 'none'; }}
+        />
+      </a>
+    );
+  }
+
+  if (fileType === 'audio' || attachment.content_type?.startsWith('audio/')) {
+    return (
+      <audio controls className="w-full max-w-xs mt-1">
+        <source src={url} />
+        <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs underline">
+          Descargar audio
+        </a>
+      </audio>
+    );
+  }
+
+  if (fileType === 'video' || attachment.content_type?.startsWith('video/')) {
+    return (
+      <video controls className="max-w-full rounded-xl max-h-48 mt-1">
+        <source src={url} />
+      </video>
+    );
+  }
+
+  // Documento / archivo genérico
+  const Icon = fileType === 'audio' ? Music : fileType === 'video' ? Film : FileText;
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`flex items-center gap-2 mt-1 px-3 py-2 rounded-xl text-xs ${
+        isOutgoing
+          ? 'bg-accent/10 border border-accent/20 text-accent hover:bg-accent/20'
+          : 'bg-white/5 border border-base-border text-gray-300 hover:bg-white/10'
+      } transition-colors`}
+    >
+      <Icon size={14} />
+      <span className="truncate max-w-[200px]">{name}</span>
+    </a>
+  );
+}
+
+/** Burbuja de mensaje individual — soporta texto y adjuntos de Chatwoot */
 function MessageBubble({ message }) {
   // message_type: 0 = incoming (del cliente), 1 = outgoing (del agente)
   const isOutgoing = message.message_type === 1 || message.message_type === 'outgoing';
   const time = formatMessageTime(message.created_at);
+  const attachments = message.attachments || [];
 
-  if (!message.content) return null; // ignorar mensajes de actividad sin contenido visible
+  // Ignorar mensajes de actividad sin contenido visible ni adjuntos
+  if (!message.content && attachments.length === 0) return null;
 
   return (
     <div className={`flex ${isOutgoing ? 'justify-end' : 'justify-start'}`}>
@@ -149,7 +215,18 @@ function MessageBubble({ message }) {
             : 'bg-base-elevated border border-base-border text-gray-200 rounded-bl-sm'
         }`}
       >
-        <p className="whitespace-pre-wrap break-words">{message.content}</p>
+        {/* Adjuntos */}
+        {attachments.map((att) => (
+          <AttachmentRenderer key={att.id} attachment={att} isOutgoing={isOutgoing} />
+        ))}
+
+        {/* Texto del mensaje */}
+        {message.content && (
+          <p className={`whitespace-pre-wrap break-words ${attachments.length > 0 ? 'mt-1.5' : ''}`}>
+            {message.content}
+          </p>
+        )}
+
         <p className={`text-[10px] mt-1 ${isOutgoing ? 'text-accent/60 text-right' : 'text-gray-600'}`}>
           {time}
         </p>
@@ -212,6 +289,11 @@ export default function Inbox() {
   const [qrForm, setQrForm]                   = useState({ titulo: '', mensaje: '' });
   const [qrEditing, setQrEditing]             = useState(null); // id being edited
   const [savingQR, setSavingQR]               = useState(false);
+
+  // ── Envío de multimedia ───────────────────────────────────────────────────
+  const [mediaPreview, setMediaPreview]   = useState(null); // { file, url, type }
+  const [sendingMedia, setSendingMedia]   = useState(false);
+  const fileInputRef = useRef(null);
 
   const messagesEndRef    = useRef(null);
   const inputRef          = useRef(null);
@@ -362,6 +444,61 @@ export default function Inbox() {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  }
+
+  function handleFileSelect(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const maxSize = 16 * 1024 * 1024; // 16 MB — límite de WhatsApp
+    if (file.size > maxSize) {
+      toast.error('El archivo supera los 16 MB permitidos por WhatsApp');
+      return;
+    }
+
+    const url = URL.createObjectURL(file);
+    const type = file.type.startsWith('image/')
+      ? 'image'
+      : file.type.startsWith('video/')
+      ? 'video'
+      : file.type.startsWith('audio/')
+      ? 'audio'
+      : 'document';
+
+    setMediaPreview({ file, url, type });
+    // Limpiar el input para permitir seleccionar el mismo archivo de nuevo
+    e.target.value = '';
+  }
+
+  function cancelMediaPreview() {
+    if (mediaPreview?.url) URL.revokeObjectURL(mediaPreview.url);
+    setMediaPreview(null);
+  }
+
+  async function handleSendMedia() {
+    if (!mediaPreview || !activeConvId || sendingMedia) return;
+
+    setSendingMedia(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', mediaPreview.file);
+      if (replyText.trim()) formData.append('caption', replyText.trim());
+
+      // Al pasar FormData, axios setea automáticamente el Content-Type con boundary.
+      // Sobreescribir 'Content-Type' manualmente rompe el boundary — se deja en undefined.
+      await api.post(`/inbox/conversations/${activeConvId}/media`, formData, {
+        headers: { 'Content-Type': undefined },
+      });
+
+      cancelMediaPreview();
+      setReplyText('');
+      await fetchMessages();
+      toast.success('Archivo enviado');
+    } catch (err) {
+      toast.error(err.message || 'Error al enviar el archivo');
+    } finally {
+      setSendingMedia(false);
     }
   }
 
@@ -553,6 +690,52 @@ export default function Inbox() {
             {/* Input de respuesta */}
             <div className="px-4 py-3 border-t border-base-border bg-base-surface shrink-0">
 
+              {/* Input de archivo oculto */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+                className="hidden"
+                onChange={handleFileSelect}
+              />
+
+              {/* Preview del archivo seleccionado */}
+              {mediaPreview && (
+                <div className="mb-2 bg-base-elevated border border-base-border rounded-xl overflow-hidden">
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-base-border">
+                    <span className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
+                      <Paperclip size={11} className="text-accent" />
+                      {mediaPreview.file.name}
+                      <span className="text-gray-600">
+                        ({(mediaPreview.file.size / 1024).toFixed(0)} KB)
+                      </span>
+                    </span>
+                    <button onClick={cancelMediaPreview} className="text-gray-600 hover:text-gray-400">
+                      <X size={12} />
+                    </button>
+                  </div>
+                  {mediaPreview.type === 'image' && (
+                    <img
+                      src={mediaPreview.url}
+                      alt="preview"
+                      className="max-h-40 max-w-full object-contain mx-auto block p-2"
+                    />
+                  )}
+                  {mediaPreview.type === 'video' && (
+                    <video src={mediaPreview.url} className="max-h-40 w-full p-2" controls />
+                  )}
+                  {mediaPreview.type === 'audio' && (
+                    <audio src={mediaPreview.url} className="w-full p-3" controls />
+                  )}
+                  {mediaPreview.type === 'document' && (
+                    <div className="flex items-center gap-2 px-3 py-3 text-gray-400">
+                      <FileText size={20} />
+                      <span className="text-xs truncate">{mediaPreview.file.name}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Panel de mensajes rápidos — se muestra sobre el textarea */}
               {showQRPanel && (
                 <div className="mb-2 bg-base-elevated border border-base-border rounded-xl overflow-hidden">
@@ -614,27 +797,49 @@ export default function Inbox() {
                   <Zap size={15} />
                 </button>
 
+                {/* Botón de adjunto */}
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Adjuntar imagen, documento o audio"
+                  className={`p-2.5 rounded-xl transition-all shrink-0 ${
+                    mediaPreview
+                      ? 'bg-accent/10 border border-accent/30 text-accent'
+                      : 'bg-base-elevated border border-base-border text-gray-500 hover:text-gray-300 hover:border-gray-500'
+                  }`}
+                >
+                  <Paperclip size={15} />
+                </button>
+
                 <textarea
                   ref={inputRef}
                   rows={1}
                   value={replyText}
                   onChange={(e) => setReplyText(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Escribí tu respuesta... (Enter para enviar)"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      mediaPreview ? handleSendMedia() : handleSend();
+                    }
+                  }}
+                  placeholder={mediaPreview ? 'Agregar texto (opcional)...' : 'Escribí tu respuesta... (Enter para enviar)'}
                   className="flex-1 px-4 py-2.5 bg-base-elevated border border-base-border rounded-xl text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent/40 resize-none leading-relaxed"
                   style={{ maxHeight: '120px', overflowY: 'auto' }}
                 />
+
+                {/* Botón enviar — cambia según si hay media o texto */}
                 <button
-                  onClick={handleSend}
-                  disabled={sending || !replyText.trim()}
+                  onClick={mediaPreview ? handleSendMedia : handleSend}
+                  disabled={
+                    mediaPreview ? sendingMedia : (sending || !replyText.trim())
+                  }
                   className={`p-2.5 rounded-xl transition-all shrink-0 ${
-                    sending || !replyText.trim()
+                    (mediaPreview ? sendingMedia : (sending || !replyText.trim()))
                       ? 'bg-base-elevated text-gray-600 cursor-not-allowed'
                       : 'bg-accent/20 border border-accent/30 text-accent hover:bg-accent/30'
                   }`}
-                  title="Enviar (Enter)"
+                  title={mediaPreview ? 'Enviar archivo' : 'Enviar (Enter)'}
                 >
-                  <Send size={16} className={sending ? 'animate-pulse' : ''} />
+                  <Send size={16} className={(sending || sendingMedia) ? 'animate-pulse' : ''} />
                 </button>
               </div>
               <p className="text-[10px] text-gray-700 mt-1.5 pl-1">

@@ -1,5 +1,5 @@
 # Plan de funcionalidades — Enviador WABA
-Última actualización: 2026-03-24 · Próxima: Fase 4 — Mensajes multimedia
+Última actualización: 2026-03-24 · Próxima: Fase 5 — Etiquetas en conversaciones
 
 ---
 
@@ -9,7 +9,7 @@
 ✅ Fase 1 — Opt-out automático        (completado 2026-03-24 · commit 779ad03)
 ✅ Fase 2 — Variables en templates    (completado 2026-03-24 · commit d05b7c2)
 ✅ Fase 3 — Historial por contacto    (completado 2026-03-24 · commit 5cdd288)
-⬜ Fase 4 — Mensajes multimedia
+✅ Fase 4 — Mensajes multimedia        (completado 2026-03-24)
 ⬜ Fase 5 — Etiquetas en conversas
 ⬜ Fase 6 — Carrito abandonado
 ⬜ Fase 7 — Analytics avanzados
@@ -61,23 +61,20 @@
 
 ---
 
-## ⬜ Fase 4 — Mensajes multimedia en el inbox
-**Complejidad:** Media · **Impacto:** Alto (hoy se pierden fotos de clientes)
+## ✅ Fase 4 — Mensajes multimedia en el inbox
+**Completado:** 2026-03-24
 
-### Backend — recepción
-- En `webhook.js`: procesar `msg.type === 'image' | 'video' | 'document' | 'audio'`
-- Guardar en `incoming_messages` con columnas `media_type` y `media_url` (URL temporal de Meta)
-- Sincronizar como adjunto en Chatwoot
-
-### Backend — envío
-- Endpoint `POST /api/inbox/conversations/:id/media` que recibe `multipart/form-data`
-- Subir el archivo a Meta (`POST /{phone-number-id}/media`) → obtener `media_id`
-- Enviar como mensaje de imagen/documento con ese `media_id`
-
-### Frontend
-- Botón de clip/adjunto junto al textarea del inbox
-- Previsualizar imagen seleccionada antes de enviar
-- En el chat: renderizar imágenes y archivos en `MessageBubble` (hoy solo muestra texto)
+### Qué se hizo
+- DB: columnas `media_type VARCHAR(20)` y `media_url TEXT` en `incoming_messages`
+- `whatsapp.js`: `getMediaUrl(mediaId)`, `uploadMediaToMeta(buffer, mimeType, filename)`, `sendMediaMessage(telefono, mediaType, mediaId, caption, filename)`
+- `webhook.js`: procesa `image | video | document | audio` — obtiene URL temporal de Meta, guarda en DB con `media_type`/`media_url`, sincroniza texto descriptivo a Chatwoot
+- `inbox.js`: `POST /api/inbox/conversations/:id/media` con multer (memoria) → sube a Meta → envía por WhatsApp → registra en Chatwoot
+- Instalado `multer@1.4.5-lts.1` en el backend
+- `Inbox.jsx`: componente `AttachmentRenderer` — renderiza imágenes (`<img>`), audio (`<audio controls>`), video (`<video controls>`), documentos (link de descarga)
+- `MessageBubble`: actualizado para mostrar `message.attachments` de Chatwoot además del texto
+- Botón de clip (📎) junto al textarea + preview del archivo antes de enviar (imagen, audio, video, documento)
+- Botón enviar adapta su comportamiento: texto normal vs archivo adjunto
+- Caption opcional cuando se envía multimedia
 
 ---
 

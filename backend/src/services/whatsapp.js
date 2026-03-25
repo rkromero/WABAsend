@@ -172,6 +172,95 @@ export async function sendFreeTextMessage(telefono, text) {
 }
 
 /**
+ * Obtiene la URL de descarga de un archivo multimedia de Meta.
+ * Las URLs son temporales (~5 minutos) y requieren el token para descargar.
+ *
+ * @param {string} mediaId - ID del media devuelto en el webhook de Meta
+ * @returns {Promise<string|null>} URL temporal de descarga
+ */
+export async function getMediaUrl(mediaId) {
+  const { token } = await getConfig();
+
+  const response = await axios.get(
+    `${META_BASE_URL}/${mediaId}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+
+  return response.data?.url || null;
+}
+
+/**
+ * Sube un archivo al servicio de media de Meta y devuelve el media_id.
+ * El media_id se usa luego para enviar mensajes con ese adjunto.
+ *
+ * Usa el FormData nativo de Node.js 18+ (disponible globalmente).
+ *
+ * @param {Buffer} buffer    - Contenido binario del archivo
+ * @param {string} mimeType  - MIME type (ej: 'image/jpeg', 'application/pdf')
+ * @param {string} filename  - Nombre de archivo (ej: 'foto.jpg')
+ * @returns {Promise<string>} media_id de Meta
+ */
+export async function uploadMediaToMeta(buffer, mimeType, filename) {
+  const { token, phoneNumberId } = await getConfig();
+
+  // Node.js 18+ expone FormData y Blob de forma global
+  const formData = new FormData();
+  formData.append('messaging_product', 'whatsapp');
+  formData.append('type', mimeType);
+  formData.append('file', new Blob([buffer], { type: mimeType }), filename);
+
+  const response = await axios.post(
+    `${META_BASE_URL}/${phoneNumberId}/media`,
+    formData,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+
+  const mediaId = response.data?.id;
+  if (!mediaId) throw new Error('Meta no devolvió un media_id al subir el archivo');
+  return mediaId;
+}
+
+/**
+ * Envía un mensaje multimedia (imagen, documento, audio, video) por WhatsApp.
+ * Requiere primero haber subido el archivo con uploadMediaToMeta() para obtener el media_id.
+ *
+ * @param {string} telefono  - Número en formato internacional
+ * @param {string} mediaType - 'image' | 'document' | 'audio' | 'video'
+ * @param {string} mediaId   - ID del media obtenido de Meta
+ * @param {string} caption   - Texto opcional que acompaña al media
+ * @param {string} filename  - Nombre del archivo (requerido solo para document)
+ * @returns {Promise<string>} ID del mensaje de WhatsApp
+ */
+export async function sendMediaMessage(telefono, mediaType, mediaId, caption = '', filename = '') {
+  const { token, phoneNumberId } = await getConfig();
+
+  // El payload varía levemente según el tipo de media
+  const mediaPayload = { id: mediaId };
+  if (caption) mediaPayload.caption = caption;
+  if (mediaType === 'document' && filename) mediaPayload.filename = filename;
+
+  const response = await axios.post(
+    `${META_BASE_URL}/${phoneNumberId}/messages`,
+    {
+      messaging_product: 'whatsapp',
+      to: telefono,
+      type: mediaType,
+      [mediaType]: mediaPayload,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+
+  const messageId = response.data?.messages?.[0]?.id;
+  if (!messageId) throw new Error('Meta no devolvió un message ID para el mensaje multimedia');
+  return messageId;
+}
+
+/**
  * Pausa la ejecución por N milisegundos.
  * Usado para rate limiting entre mensajes.
  *

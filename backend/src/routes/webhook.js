@@ -18,7 +18,7 @@ import {
   sendMessageToConversation,
 } from '../services/chatwoot.js';
 import { shouldBotRespond, generateBotResponse, sanitizeBotResponse } from '../services/bot.js';
-import { sendFreeTextMessage } from '../services/whatsapp.js';
+import { sendFreeTextMessage, getMediaUrl } from '../services/whatsapp.js';
 import { getConversationHistory, saveConversationTurn } from '../services/conversationMemory.js';
 
 const router = Router();
@@ -77,18 +77,18 @@ router.post('/', async (req, res) => {
         // --- Procesar mensajes entrantes (mensajes que nos envían los usuarios) ---
         const messages = value.messages || [];
         for (const msg of messages) {
-          // Solo procesamos mensajes de texto; ignoramos imágenes, audio, etc. por ahora
-          if (msg.type !== 'text') continue;
-
-          const telefono = msg.from; // número del remitente en formato internacional
-          const messageText = msg.text?.body || '';
+          const telefono = msg.from;
           const waMessageId = msg.id;
-
-          // El nombre del contacto viene en el array `contacts` del mismo payload
           const contactProfile = value.contacts?.find((c) => c.wa_id === telefono);
           const nombre = contactProfile?.profile?.name || telefono;
 
-          await processIncomingMessage({ telefono, nombre, messageText, waMessageId });
+          if (msg.type === 'text') {
+            const messageText = msg.text?.body || '';
+            await processIncomingMessage({ telefono, nombre, messageText, waMessageId });
+          } else if (['image', 'video', 'document', 'audio'].includes(msg.type)) {
+            await processIncomingMedia({ telefono, nombre, waMessageId, msg });
+          }
+          // ignorar reactions, location, contacts, stickers, etc.
         }
       }
     }
@@ -227,6 +227,76 @@ async function processIncomingMessage({ telefono, nombre, messageText, waMessage
   } catch (botErr) {
     // El bot falla silenciosamente — nunca debe cortar el flujo principal del webhook
     console.error('[Bot] Error al generar o enviar respuesta:', botErr.message);
+  }
+}
+
+/** Etiquetas legibles para cada tipo de media */
+const MEDIA_LABELS = {
+  image: 'Imagen',
+  video: 'Video',
+  document: 'Documento',
+  audio: 'Audio',
+};
+
+/**
+ * Procesa un mensaje multimedia entrante (imagen, video, documento, audio).
+ * Obtiene la URL temporal del archivo desde Meta, guarda en DB y sincroniza
+ * con Chatwoot como texto descriptivo.
+ *
+ * ⚠️ Las URLs de media de Meta expiran en ~5 minutos. Se almacenan como
+ *    referencia pero pueden no ser accesibles tiempo después.
+ *
+ * @param {Object} params
+ * @param {string} params.telefono    - Número del remitente
+ * @param {string} params.nombre      - Nombre del remitente
+ * @param {string} params.waMessageId - ID del mensaje de WhatsApp
+ * @param {Object} params.msg         - Objeto del mensaje de Meta
+ */
+async function processIncomingMedia({ telefono, nombre, waMessageId, msg }) {
+  const mediaType = msg.type;
+  const mediaData = msg[mediaType] || {};
+  const mediaId   = mediaData.id;
+  const caption   = mediaData.caption || '';
+  const filename  = mediaData.filename || '';
+
+  // Intentar obtener la URL temporal de descarga desde Meta
+  let mediaUrl = null;
+  if (mediaId) {
+    try {
+      mediaUrl = await getMediaUrl(mediaId);
+    } catch (err) {
+      console.warn(`[Webhook] No se pudo obtener URL del media ${mediaId}:`, err.message);
+    }
+  }
+
+  // Texto descriptivo para Chatwoot y trazabilidad
+  const label = MEDIA_LABELS[mediaType] || mediaType;
+  let messageText = caption ? `[${label}] ${caption}` : `[${label} recibido]`;
+  if (filename) messageText += ` — ${filename}`;
+
+  // Sincronizar con Chatwoot (como mensaje de texto descriptivo)
+  let chatwootConversationId = null;
+  try {
+    const contact      = await getOrCreateContact(telefono, nombre);
+    const conversation = await getOrCreateConversation(contact.id);
+    chatwootConversationId = conversation.id;
+    await sendMessageToConversation(conversation.id, messageText, 'incoming');
+    console.log(`[Webhook] Media entrante de ${telefono} (${mediaType}) sincronizado con Chatwoot`);
+  } catch (err) {
+    console.warn('[Webhook] No se pudo sincronizar media con Chatwoot:', err.message);
+  }
+
+  // Guardar en DB local con tipo y URL del media
+  try {
+    await query(
+      `INSERT INTO incoming_messages
+         (telefono, nombre, message, whatsapp_message_id, chatwoot_conversation_id, media_type, media_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [telefono, nombre, messageText, waMessageId, chatwootConversationId, mediaType, mediaUrl]
+    );
+    console.log(`[Webhook] Media entrante guardado — de: ${telefono} tipo: ${mediaType}`);
+  } catch (err) {
+    console.error('[Webhook] Error guardando media entrante en DB:', err.message);
   }
 }
 
