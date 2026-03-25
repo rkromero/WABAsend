@@ -429,6 +429,21 @@ export async function initSchema() {
       ON waba_conversation_followups(telefono, sent_at DESC);
   `);
 
+  // 9a. Mensajes rápidos predeterminados para la bandeja de entrada
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS waba_quick_replies (
+        id         SERIAL PRIMARY KEY,
+        titulo     VARCHAR(100) NOT NULL,
+        mensaje    TEXT         NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+  } catch (err) {
+    console.warn('[DB] waba_quick_replies migration warning:', err.message.split('\n')[0]);
+  }
+
   // 9b. Ventana de contexto de campaña — para que el bot responda con el contexto correcto
   // cuando alguien responde a una campaña saliente dentro de las 48h siguientes al envío.
   try {

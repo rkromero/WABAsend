@@ -17,6 +17,11 @@ import {
   RefreshCw,
   Bot,
   UserCheck,
+  Zap,
+  X,
+  Plus,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format, formatDistanceToNow, parseISO } from 'date-fns';
@@ -200,6 +205,14 @@ export default function Inbox() {
   const [botPaused, setBotPaused]             = useState(false);
   const [togglingBot, setTogglingBot]         = useState(false);
 
+  // ── Mensajes rápidos ──────────────────────────────────────────────────────
+  const [quickReplies, setQuickReplies]       = useState([]);
+  const [showQRPanel, setShowQRPanel]         = useState(false);
+  const [showQRModal, setShowQRModal]         = useState(false);
+  const [qrForm, setQrForm]                   = useState({ titulo: '', mensaje: '' });
+  const [qrEditing, setQrEditing]             = useState(null); // id being edited
+  const [savingQR, setSavingQR]               = useState(false);
+
   const messagesEndRef    = useRef(null);
   const inputRef          = useRef(null);
   // Ref para detectar nuevos mensajes sin re-renders: guarda el total de
@@ -352,6 +365,63 @@ export default function Inbox() {
     }
   }
 
+  // ── Mensajes rápidos: fetch + CRUD ───────────────────────────────────────
+
+  const fetchQuickReplies = useCallback(async () => {
+    try {
+      const res = await api.get('/inbox/quick-replies');
+      setQuickReplies(res.data?.data || []);
+    } catch { /* silencioso */ }
+  }, []);
+
+  useEffect(() => { fetchQuickReplies(); }, [fetchQuickReplies]);
+
+  function openQRCreate() {
+    setQrEditing(null);
+    setQrForm({ titulo: '', mensaje: '' });
+    setShowQRModal(true);
+  }
+
+  function openQREdit(qr) {
+    setQrEditing(qr.id);
+    setQrForm({ titulo: qr.titulo, mensaje: qr.mensaje });
+    setShowQRModal(true);
+  }
+
+  async function handleSaveQR() {
+    if (!qrForm.titulo.trim() || !qrForm.mensaje.trim()) return;
+    setSavingQR(true);
+    try {
+      if (qrEditing) {
+        await api.put(`/inbox/quick-replies/${qrEditing}`, qrForm);
+      } else {
+        await api.post('/inbox/quick-replies', qrForm);
+      }
+      await fetchQuickReplies();
+      setShowQRModal(false);
+    } catch (err) {
+      toast.error(err.message || 'Error al guardar');
+    } finally {
+      setSavingQR(false);
+    }
+  }
+
+  async function handleDeleteQR(id) {
+    if (!window.confirm('¿Eliminar este mensaje rápido?')) return;
+    try {
+      await api.delete(`/inbox/quick-replies/${id}`);
+      setQuickReplies((prev) => prev.filter((q) => q.id !== id));
+    } catch (err) {
+      toast.error(err.message || 'Error al eliminar');
+    }
+  }
+
+  function applyQuickReply(mensaje) {
+    setReplyText(mensaje);
+    setShowQRPanel(false);
+    inputRef.current?.focus();
+  }
+
   // ── Filtro de búsqueda ────────────────────────────────────────────────────
 
   const filtered = conversations.filter((conv) => {
@@ -482,7 +552,68 @@ export default function Inbox() {
 
             {/* Input de respuesta */}
             <div className="px-4 py-3 border-t border-base-border bg-base-surface shrink-0">
+
+              {/* Panel de mensajes rápidos — se muestra sobre el textarea */}
+              {showQRPanel && (
+                <div className="mb-2 bg-base-elevated border border-base-border rounded-xl overflow-hidden">
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-base-border">
+                    <span className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
+                      <Zap size={11} className="text-yellow-400" />
+                      Mensajes rápidos
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => { setShowQRPanel(false); openQRCreate(); }}
+                        className="text-[10px] text-accent hover:text-accent/80 flex items-center gap-0.5"
+                      >
+                        <Plus size={10} /> Nuevo
+                      </button>
+                      <button
+                        onClick={() => { setShowQRPanel(false); openQRCreate(); }}
+                        className="text-[10px] text-gray-500 hover:text-gray-300"
+                      >
+                        Gestionar
+                      </button>
+                      <button onClick={() => setShowQRPanel(false)} className="text-gray-600 hover:text-gray-400">
+                        <X size={12} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto">
+                    {quickReplies.length === 0 ? (
+                      <p className="text-xs text-gray-600 text-center py-4">
+                        No hay mensajes rápidos. Creá uno con "+ Nuevo".
+                      </p>
+                    ) : (
+                      quickReplies.map((qr) => (
+                        <button
+                          key={qr.id}
+                          onClick={() => applyQuickReply(qr.mensaje)}
+                          className="w-full text-left px-3 py-2.5 hover:bg-white/[0.04] transition-colors border-b border-base-border/50 last:border-0 group"
+                        >
+                          <p className="text-xs font-medium text-accent truncate">{qr.titulo}</p>
+                          <p className="text-[11px] text-gray-400 truncate mt-0.5 leading-snug">{qr.mensaje}</p>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-end gap-2">
+                {/* Botón de mensajes rápidos */}
+                <button
+                  onClick={() => setShowQRPanel((v) => !v)}
+                  title="Mensajes rápidos"
+                  className={`p-2.5 rounded-xl transition-all shrink-0 ${
+                    showQRPanel
+                      ? 'bg-yellow-400/10 border border-yellow-400/30 text-yellow-400'
+                      : 'bg-base-elevated border border-base-border text-gray-500 hover:text-gray-300 hover:border-gray-500'
+                  }`}
+                >
+                  <Zap size={15} />
+                </button>
+
                 <textarea
                   ref={inputRef}
                   rows={1}
@@ -526,6 +657,112 @@ export default function Inbox() {
           </div>
         )}
       </div>
+
+      {/* ─── Modal: gestión de mensajes rápidos ──────────────────────────── */}
+      {showQRModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-base-surface border border-base-border rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh]">
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-base-border shrink-0">
+              <h2 className="text-sm font-display font-bold text-white flex items-center gap-2">
+                <Zap size={14} className="text-yellow-400" />
+                Mensajes rápidos
+              </h2>
+              <button onClick={() => setShowQRModal(false)} className="text-gray-500 hover:text-gray-300">
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Formulario crear / editar */}
+            <div className="px-5 py-4 border-b border-base-border shrink-0 space-y-3">
+              <p className="text-[11px] text-gray-500 uppercase tracking-wider">
+                {qrEditing ? 'Editar mensaje' : 'Nuevo mensaje'}
+              </p>
+              <input
+                type="text"
+                placeholder="Título (ej: Saludo inicial)"
+                value={qrForm.titulo}
+                onChange={(e) => setQrForm((f) => ({ ...f, titulo: e.target.value }))}
+                className="w-full px-3 py-2 bg-base-elevated border border-base-border rounded-lg text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent/40"
+              />
+              <textarea
+                rows={3}
+                placeholder="Texto del mensaje..."
+                value={qrForm.mensaje}
+                onChange={(e) => setQrForm((f) => ({ ...f, mensaje: e.target.value }))}
+                className="w-full px-3 py-2 bg-base-elevated border border-base-border rounded-lg text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent/40 resize-none leading-relaxed"
+              />
+              <div className="flex gap-2 justify-end">
+                {qrEditing && (
+                  <button
+                    onClick={() => { setQrEditing(null); setQrForm({ titulo: '', mensaje: '' }); }}
+                    className="px-3 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+                  >
+                    Cancelar edición
+                  </button>
+                )}
+                <button
+                  onClick={handleSaveQR}
+                  disabled={savingQR || !qrForm.titulo.trim() || !qrForm.mensaje.trim()}
+                  className="flex items-center gap-1.5 px-4 py-1.5 bg-accent/20 border border-accent/30 text-accent rounded-lg text-xs font-medium hover:bg-accent/30 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Plus size={12} />
+                  {qrEditing ? 'Guardar cambios' : 'Agregar'}
+                </button>
+              </div>
+            </div>
+
+            {/* Lista de mensajes rápidos existentes */}
+            <div className="flex-1 overflow-y-auto px-5 py-3 space-y-2">
+              {quickReplies.length === 0 ? (
+                <p className="text-xs text-gray-600 text-center py-6">
+                  Aún no hay mensajes rápidos. Creá el primero arriba.
+                </p>
+              ) : (
+                quickReplies.map((qr) => (
+                  <div
+                    key={qr.id}
+                    className="flex items-start gap-3 p-3 bg-base-elevated border border-base-border rounded-xl"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-accent">{qr.titulo}</p>
+                      <p className="text-[11px] text-gray-400 mt-0.5 leading-snug whitespace-pre-wrap break-words">
+                        {qr.mensaje}
+                      </p>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      <button
+                        onClick={() => openQREdit(qr)}
+                        className="p-1.5 text-gray-500 hover:text-gray-200 transition-colors"
+                        title="Editar"
+                      >
+                        <Pencil size={12} />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteQR(qr.id)}
+                        className="p-1.5 text-gray-500 hover:text-red-400 transition-colors"
+                        title="Eliminar"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="px-5 py-3 border-t border-base-border shrink-0 text-right">
+              <button
+                onClick={() => setShowQRModal(false)}
+                className="px-4 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

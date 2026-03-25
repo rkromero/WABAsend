@@ -228,4 +228,66 @@ router.post('/conversations/:id/release', async (req, res) => {
   }
 });
 
+// ── Mensajes rápidos ──────────────────────────────────────────────────────
+
+// GET /api/inbox/quick-replies
+router.get('/quick-replies', async (req, res) => {
+  try {
+    const result = await query(
+      'SELECT id, titulo, mensaje, created_at FROM waba_quick_replies ORDER BY titulo ASC'
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/inbox/quick-replies
+router.post('/quick-replies', async (req, res) => {
+  const { titulo, mensaje } = req.body;
+  if (!titulo?.trim() || !mensaje?.trim()) {
+    return res.status(400).json({ success: false, error: 'titulo y mensaje son requeridos' });
+  }
+  try {
+    const result = await query(
+      `INSERT INTO waba_quick_replies (titulo, mensaje) VALUES ($1, $2) RETURNING *`,
+      [titulo.trim(), mensaje.trim()]
+    );
+    res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /api/inbox/quick-replies/:id
+router.put('/quick-replies/:id', async (req, res) => {
+  const { titulo, mensaje } = req.body;
+  if (!titulo?.trim() || !mensaje?.trim()) {
+    return res.status(400).json({ success: false, error: 'titulo y mensaje son requeridos' });
+  }
+  try {
+    const result = await query(
+      `UPDATE waba_quick_replies SET titulo = $1, mensaje = $2, updated_at = NOW()
+       WHERE id = $3 RETURNING *`,
+      [titulo.trim(), mensaje.trim(), req.params.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'No encontrado' });
+    }
+    res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/inbox/quick-replies/:id
+router.delete('/quick-replies/:id', async (req, res) => {
+  try {
+    await query('DELETE FROM waba_quick_replies WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 export default router;
