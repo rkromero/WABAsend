@@ -227,7 +227,7 @@ function Step3({ data, onChange }) {
     setLoading(true);
     api.get('/contacts', {
       params: {
-        limit: 500,
+        limit: 10000,
         search:   search   || undefined,
         segmento: segmento || undefined,
       },
