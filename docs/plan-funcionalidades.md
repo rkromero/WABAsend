@@ -1,19 +1,20 @@
 # Plan de funcionalidades — Enviador WABA
-Última actualización: 2026-03-25 · Próxima: Fase 5 — Etiquetas en conversaciones
+Última actualización: 2026-03-25 · Próxima: Fase 6 — Carrito abandonado
 
 ---
 
 ## Estado general
 
 ```
-✅ Fase 1 — Opt-out automático        (completado 2026-03-24 · commit 779ad03)
-✅ Fase 2 — Variables en templates    (completado 2026-03-24 · commit d05b7c2)
-✅ Fase 3 — Historial por contacto    (completado 2026-03-24 · commit 5cdd288)
-✅ Fase 4 — Mensajes multimedia        (completado 2026-03-24)
-✅ Fase 4b — Transcripción de audio (Whisper) (completado 2026-03-25)
-⬜ Fase 5 — Etiquetas en conversas
+✅ Fase 1 — Opt-out automático              (completado 2026-03-24 · commit 779ad03)
+✅ Fase 2 — Variables en templates          (completado 2026-03-24 · commit d05b7c2)
+✅ Fase 3 — Historial por contacto          (completado 2026-03-24 · commit 5cdd288)
+✅ Fase 4 — Mensajes multimedia             (completado 2026-03-24)
+✅ Fase 4b — Transcripción de audio         (completado 2026-03-25 · commit c0f9bbd)
+✅ Fase 5 — Etiquetas en conversaciones     (completado 2026-03-25 · commit b2a62ee)
+✅ Fase 5b — Auto-etiquetado con IA         (completado 2026-03-25 · commit 34c0998)
+✅ Fase 7 — Analytics avanzados             (completado 2026-03-25)
 ⬜ Fase 6 — Carrito abandonado
-⬜ Fase 7 — Analytics avanzados
 ```
 
 ---

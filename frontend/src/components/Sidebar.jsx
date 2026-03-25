@@ -12,11 +12,13 @@ import {
   ShoppingBag,
   Zap,
   BookOpen,
+  TrendingUp,
 } from 'lucide-react';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/campaigns', icon: Send, label: 'Campañas' },
+  { to: '/analytics', icon: TrendingUp, label: 'Analytics' },
   { to: '/automations', icon: Zap, label: 'Automatizaciones' },
   { to: '/inbox', icon: MessageSquare, label: 'Bandeja' },
   { to: '/bot', icon: Bot, label: 'Bot' },

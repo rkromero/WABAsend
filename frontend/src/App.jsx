@@ -12,6 +12,7 @@ import Bot from './pages/Bot.jsx';
 import Products from './pages/Products.jsx';
 import Automations from './pages/Automations.jsx';
 import Knowledge from './pages/Knowledge.jsx';
+import Analytics from './pages/Analytics.jsx';
 
 export default function App() {
   const location = useLocation();
@@ -39,6 +40,7 @@ export default function App() {
               <Route path="/products" element={<Products />} />
               <Route path="/automations" element={<Automations />} />
               <Route path="/knowledge" element={<Knowledge />} />
+              <Route path="/analytics" element={<Analytics />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </div>
