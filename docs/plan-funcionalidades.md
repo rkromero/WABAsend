@@ -1,5 +1,5 @@
 # Plan de funcionalidades — Enviador WABA
-Última actualización: 2026-03-25 · Próxima: Fase 4b — Transcripción de audio con Whisper
+Última actualización: 2026-03-25 · Próxima: Fase 5 — Etiquetas en conversaciones
 
 ---
 
@@ -10,7 +10,7 @@
 ✅ Fase 2 — Variables en templates    (completado 2026-03-24 · commit d05b7c2)
 ✅ Fase 3 — Historial por contacto    (completado 2026-03-24 · commit 5cdd288)
 ✅ Fase 4 — Mensajes multimedia        (completado 2026-03-24)
-⬜ Fase 4b — Transcripción de audio (Whisper)
+✅ Fase 4b — Transcripción de audio (Whisper) (completado 2026-03-25)
 ⬜ Fase 5 — Etiquetas en conversas
 ⬜ Fase 6 — Carrito abandonado
 ⬜ Fase 7 — Analytics avanzados
@@ -79,38 +79,19 @@
 
 ---
 
-## ⬜ Fase 4b — Transcripción de audio con Whisper
-**Complejidad:** Baja · **Impacto:** Alto (el bot responde mensajes de voz en lugar de ignorarlos)
+## ✅ Fase 4b — Transcripción de audio con Whisper
+**Completado:** 2026-03-25
 
-### Decisión técnica
-Usar **OpenAI Whisper API** (Opción 1). Justificación:
-- La `OPENAI_API_KEY` ya existe en el proyecto
-- Whisper acepta `.ogg/Opus` (formato nativo de WhatsApp) sin conversión
-- Costo despreciable: ~$0.006 USD por minuto de audio
-- Precisión excelente en español argentino
-
-### Flujo
-```
-Webhook recibe msg.type === 'audio'
-  → getMediaUrl(mediaId)           # URL temporal de Meta
-  → descargar buffer del audio     # axios GET con token (antes de que expire)
-  → openai.audio.transcriptions.create(buffer, 'whisper-1')
-  → texto transcripto
-  → generateBotResponse(texto)     # respuesta de IA normal
-  → sendFreeTextMessage(...)       # respuesta por WhatsApp
-  → saveConversationTurn(...)      # persistir en memoria
-```
-
-### Backend
-- Nueva función `transcribeAudio(buffer, mimeType)` en `services/whatsapp.js` o `services/bot.js`
-- En `webhook.js > processIncomingMedia`: si `mediaType === 'audio'`, descargar + transcribir + responder con IA
-- Si la transcripción falla (silencio, ruido, error de API) → fallback al acuse de recibo actual
-- Loguear la transcripción para debugging
-
-### Consideraciones
-- El audio de WhatsApp expira en minutos: descargar el buffer inmediatamente al recibir el webhook
-- Máx. 25 MB por archivo para Whisper (los audios de WA son siempre menores)
-- La descarga requiere el token de Meta en el header `Authorization`
+### Qué se hizo
+- `whatsapp.js`: `downloadMediaBuffer(mediaUrl)` — descarga buffer con token de Meta (arraybuffer)
+- `whatsapp.js`: `transcribeAudio(buffer, mimeType)` — llama a Whisper API (`whisper-1`, `language: 'es'`), detecta extensión por MIME type, usa `File` nativo de Node.js 18+
+- `webhook.js`: `processIncomingMedia` completamente reescrito para audio:
+  - Descarga buffer inmediatamente (antes de que expire la URL de Meta)
+  - Transcribe con Whisper; si falla → fallback al acuse de recibo
+  - Genera respuesta de IA con el texto transcripto, igual que un mensaje de texto
+  - Envía la transcripción a Chatwoot como mensaje entrante (`🎙️ [Transcripción de audio] "..."`)
+  - Guarda el turno en la memoria de conversación con el texto real
+- Fallback si Whisper falla: "Recibí tu mensaje de voz, pero no pude escucharlo correctamente..."
 
 ---
 

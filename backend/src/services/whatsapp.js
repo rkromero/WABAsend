@@ -10,7 +10,11 @@
  */
 
 import axios from 'axios';
+import OpenAI from 'openai';
 import { query } from '../db/index.js';
+
+// La instancia de OpenAI se usa solo para Whisper — la clave viene del .env
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const META_API_VERSION = 'v21.0';
 const META_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
@@ -187,6 +191,52 @@ export async function getMediaUrl(mediaId) {
   );
 
   return response.data?.url || null;
+}
+
+/**
+ * Descarga el contenido binario de una URL temporal de media de Meta.
+ * Las URLs de media de Meta expiran en ~5 minutos y requieren el token en el header.
+ *
+ * ⚠️ Llamar lo antes posible después de recibir el webhook.
+ *
+ * @param {string} mediaUrl - URL temporal devuelta por getMediaUrl()
+ * @returns {Promise<Buffer>} Buffer con el contenido del archivo
+ */
+export async function downloadMediaBuffer(mediaUrl) {
+  const { token } = await getConfig();
+  const response = await axios.get(mediaUrl, {
+    headers: { Authorization: `Bearer ${token}` },
+    responseType: 'arraybuffer',
+  });
+  return Buffer.from(response.data);
+}
+
+/**
+ * Transcribe un buffer de audio usando OpenAI Whisper.
+ * Optimizado para español. Acepta .ogg/Opus (formato nativo de WhatsApp) sin conversión.
+ *
+ * @param {Buffer} buffer   - Buffer del archivo de audio
+ * @param {string} mimeType - MIME type del audio (ej: 'audio/ogg; codecs=opus', 'audio/mpeg')
+ * @returns {Promise<string|null>} Texto transcripto, o null si falla o está vacío
+ */
+export async function transcribeAudio(buffer, mimeType) {
+  // Determinar extensión a partir del MIME type para que Whisper reconozca el formato
+  const ext = mimeType.includes('ogg')  ? 'ogg'  :
+              mimeType.includes('mp4')  ? 'm4a'  :
+              mimeType.includes('mpeg') ? 'mp3'  :
+              mimeType.includes('wav')  ? 'wav'  : 'ogg';
+
+  // Node.js 18+ expone File globalmente — lo usamos para pasarle el buffer a la SDK de OpenAI
+  const file = new File([buffer], `audio.${ext}`, { type: mimeType });
+
+  const response = await openai.audio.transcriptions.create({
+    file,
+    model: 'whisper-1',
+    language: 'es',  // Forzar español para mejor precisión en argentino
+  });
+
+  const text = response.text?.trim() || null;
+  return text || null;
 }
 
 /**

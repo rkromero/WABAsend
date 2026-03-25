@@ -18,7 +18,7 @@ import {
   sendMessageToConversation,
 } from '../services/chatwoot.js';
 import { shouldBotRespond, generateBotResponse, sanitizeBotResponse } from '../services/bot.js';
-import { sendFreeTextMessage, getMediaUrl } from '../services/whatsapp.js';
+import { sendFreeTextMessage, getMediaUrl, downloadMediaBuffer, transcribeAudio } from '../services/whatsapp.js';
 import { getConversationHistory, saveConversationTurn } from '../services/conversationMemory.js';
 
 const router = Router();
@@ -300,24 +300,62 @@ async function processIncomingMedia({ telefono, nombre, waMessageId, msg }) {
   }
 
   // --- Bot: responder al media si está activo ---
-  // Si hay caption en una imagen, el bot responde al caption como si fuera texto.
-  // Para audio, video y documentos sin texto, envía un acuse de recibo fijo.
+  // Audio: transcribir con Whisper → responder con IA al texto transcripto.
+  // Imagen con caption: responder con IA al caption.
+  // Resto (video, documento, imagen sin texto): acuse de recibo fijo.
   try {
     const botActive = await shouldBotRespond(telefono);
     if (!botActive) return;
 
     let botResponse;
+    let userText = null; // texto que se guardará en la memoria de conversación
 
-    if (mediaType === 'image' && caption) {
-      // Imagen con texto: generar respuesta de IA al caption
+    if (mediaType === 'audio') {
+      // Flujo Whisper: descargar buffer → transcribir → responder con IA
+      // Fallback al acuse de recibo fijo si algo falla
+      try {
+        if (!mediaUrl) throw new Error('Sin URL de media — no se puede descargar el audio');
+
+        const audioBuffer = await downloadMediaBuffer(mediaUrl);
+        const mimeType = mediaData.mime_type || 'audio/ogg';
+
+        const transcripcion = await transcribeAudio(audioBuffer, mimeType);
+
+        if (!transcripcion) throw new Error('Transcripción vacía o en silencio');
+
+        console.log(`[Whisper] Transcripción de ${telefono}: "${transcripcion}"`);
+
+        const conversationHistory = await getConversationHistory(telefono);
+        const rawBotResponse = await generateBotResponse(transcripcion, conversationHistory, null);
+        botResponse = await sanitizeBotResponse(rawBotResponse);
+        userText = transcripcion; // guardar el texto real en la memoria
+
+        // Mostrar en Chatwoot la transcripción para que el agente humano la vea
+        if (chatwootConversationId) {
+          try {
+            await sendMessageToConversation(
+              chatwootConversationId,
+              `🎙️ [Transcripción de audio] "${transcripcion}"`,
+              'incoming'
+            );
+          } catch { /* no crítico */ }
+        }
+      } catch (whisperErr) {
+        // Fallback: el audio no se pudo transcribir — responder con acuse de recibo
+        console.warn(`[Whisper] Transcripción fallida para ${telefono}: ${whisperErr.message} — usando acuse de recibo`);
+        botResponse = 'Recibí tu mensaje de voz, pero no pude escucharlo correctamente. ¿Me podés escribir tu consulta?';
+      }
+
+    } else if (mediaType === 'image' && caption) {
+      // Imagen con texto: responder con IA al caption
       const conversationHistory = await getConversationHistory(telefono);
       const rawBotResponse = await generateBotResponse(caption, conversationHistory, null);
       botResponse = await sanitizeBotResponse(rawBotResponse);
-      await saveConversationTurn(telefono, caption, botResponse);
+      userText = caption;
+
     } else {
-      // Audio, video, documento, o imagen sin caption: acuse de recibo fijo
+      // Video, documento, o imagen sin caption: acuse de recibo fijo
       const acks = {
-        audio:    'Recibí tu mensaje de voz. Por ahora no puedo escucharlo — ¿me escribís tu consulta en texto?',
         image:    'Recibí tu imagen. ¿En qué te puedo ayudar?',
         video:    'Recibí tu video. ¿En qué te puedo ayudar?',
         document: 'Recibí tu documento. ¿En qué te puedo ayudar?',
@@ -325,14 +363,19 @@ async function processIncomingMedia({ telefono, nombre, waMessageId, msg }) {
       botResponse = acks[mediaType] || 'Recibí tu mensaje. ¿En qué te puedo ayudar?';
     }
 
+    // Guardar el turno en la memoria si tenemos texto real (no para acuses de recibo fijos)
+    if (userText) {
+      await saveConversationTurn(telefono, userText, botResponse);
+    }
+
     const botMessageId = await sendFreeTextMessage(telefono, botResponse);
-    console.log(`[Bot] Acuse de recibo media enviado a ${telefono} — WA ID: ${botMessageId}`);
+    console.log(`[Bot] Respuesta enviada a ${telefono} — WA ID: ${botMessageId}`);
 
     if (chatwootConversationId) {
       try {
         await sendMessageToConversation(chatwootConversationId, botResponse, 'outgoing');
       } catch (cwErr) {
-        console.warn('[Bot] No se pudo registrar acuse en Chatwoot:', cwErr.message);
+        console.warn('[Bot] No se pudo registrar respuesta en Chatwoot:', cwErr.message);
       }
     }
   } catch (botErr) {
