@@ -91,12 +91,13 @@ export default function Contacts() {
         header: ['nombre', 'telefono', 'email', 'segmento', 'importado'],
       });
 
-      // Encabezados legibles en la primera fila
-      ws['A1'].v = 'Nombre';
-      ws['B1'].v = 'Teléfono';
-      ws['C1'].v = 'Email';
-      ws['D1'].v = 'Segmento';
-      ws['E1'].v = 'Importado';
+      // Encabezados sin acentos — el uploader los normaliza con toLowerCase()
+      // y busca exactamente: nombre, telefono, email, segmento
+      ws['A1'].v = 'nombre';
+      ws['B1'].v = 'telefono';
+      ws['C1'].v = 'email';
+      ws['D1'].v = 'segmento';
+      ws['E1'].v = 'importado';
 
       // Anchos de columna
       ws['!cols'] = [{ wch: 30 }, { wch: 18 }, { wch: 35 }, { wch: 20 }, { wch: 14 }];
