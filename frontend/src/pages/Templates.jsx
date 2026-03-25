@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { FileText, Plus, RefreshCw, ChevronDown, ChevronUp, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../lib/api.js';
@@ -83,6 +83,14 @@ function TemplateCard({ template }) {
   );
 }
 
+// Variables disponibles para insertar en el template
+const VARIABLE_SOURCES = [
+  { label: 'Nombre',    key: 'nombre',    example: 'Juan'              },
+  { label: 'Teléfono',  key: 'telefono',  example: '1123456789'        },
+  { label: 'Email',     key: 'email',     example: 'juan@ejemplo.com'  },
+];
+const VAR_EXAMPLE = { nombre: 'Juan', telefono: '1123456789', email: 'juan@ejemplo.com' };
+
 function NewTemplateForm({ onSuccess, onCancel }) {
   const [form, setForm] = useState({
     name: '',
@@ -94,7 +102,10 @@ function NewTemplateForm({ onSuccess, onCancel }) {
     useButtons: false,
     buttons: [{ text: '', url: '' }],
   });
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving]       = useState(false);
+  // varLegend[0] = source del {{1}}, varLegend[1] = source del {{2}}, etc.
+  const [varLegend, setVarLegend] = useState([]);
+  const textareaRef               = useRef(null);
 
   function update(k, v) { setForm((f) => ({ ...f, [k]: v })); }
 
@@ -116,8 +127,51 @@ function NewTemplateForm({ onSuccess, onCancel }) {
     setForm((f) => ({ ...f, buttons: f.buttons.filter((_, i) => i !== idx) }));
   }
 
-  // Preview: reemplaza {{1}} con "Juan" para mostrar cómo se ve
-  const previewText = form.bodyText.replace(/\{\{1\}\}/g, 'Juan');
+  /** Inserta {{N}} en la posición del cursor y registra el tipo de variable. */
+  function insertVariable(sourceKey) {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    // Determinar el próximo N disponible (máximo usado + 1)
+    const matches = form.bodyText.match(/\{\{(\d+)\}\}/g) || [];
+    const maxN = matches.reduce((m, v) => {
+      const n = parseInt(v.replace(/[{}]/g, ''), 10);
+      return Math.max(m, n);
+    }, 0);
+    const insertN = maxN + 1;
+    const insert = `{{${insertN}}}`;
+
+    // Insertar en la posición del cursor
+    const start = textarea.selectionStart;
+    const end   = textarea.selectionEnd;
+    const newText = form.bodyText.substring(0, start) + insert + form.bodyText.substring(end);
+    update('bodyText', newText);
+
+    // Registrar en la leyenda
+    setVarLegend((prev) => {
+      const next = [...prev];
+      next[insertN - 1] = sourceKey;
+      return next;
+    });
+
+    // Restaurar foco y cursor después del texto insertado
+    setTimeout(() => {
+      textarea.focus();
+      const pos = start + insert.length;
+      textarea.setSelectionRange(pos, pos);
+    }, 0);
+  }
+
+  // Preview: reemplaza cada {{N}} con el valor de ejemplo según la leyenda
+  const previewText = form.bodyText.replace(/\{\{(\d+)\}\}/g, (match, n) => {
+    const sourceKey = varLegend[parseInt(n, 10) - 1];
+    return sourceKey ? (VAR_EXAMPLE[sourceKey] ?? match) : match;
+  });
+
+  // Variables detectadas en el texto actual, en orden numérico
+  const detectedVars = [...new Set((form.bodyText.match(/\{\{(\d+)\}\}/g) || []))]
+    .map((v) => parseInt(v.replace(/[{}]/g, ''), 10))
+    .sort((a, b) => a - b);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -126,12 +180,23 @@ function NewTemplateForm({ onSuccess, onCancel }) {
       return;
     }
 
-    const hasVariable = /\{\{\d+\}\}/.test(form.bodyText);
+    // Detectar todas las variables usadas, ordenadas por número
+    const varMatches = [...new Set((form.bodyText.match(/\{\{(\d+)\}\}/g) || []))]
+      .map((v) => parseInt(v.replace(/[{}]/g, ''), 10))
+      .sort((a, b) => a - b);
+    const hasVariable = varMatches.length > 0;
+
+    // Construir los valores de ejemplo para Meta (requerido cuando hay variables)
+    const exampleValues = varMatches.map((n) => {
+      const srcKey = varLegend[n - 1];
+      return VAR_EXAMPLE[srcKey] ?? 'Ejemplo';
+    });
+
     const components = [
       {
         type: 'BODY',
         text: form.bodyText,
-        ...(hasVariable ? { example: { body_text: [['Juan']] } } : {}),
+        ...(hasVariable ? { example: { body_text: [exampleValues] } } : {}),
       },
     ];
 
@@ -209,13 +274,46 @@ function NewTemplateForm({ onSuccess, onCancel }) {
           <div>
             <label className="form-label">TEXTO DEL MENSAJE</label>
             <textarea
+              ref={textareaRef}
               className="input-field min-h-[120px] resize-y"
               placeholder="Hola {{1}}, tenemos una promo especial para vos..."
               value={form.bodyText}
               onChange={(e) => update('bodyText', e.target.value)}
             />
-            <p className="text-xs text-accent mt-1">
-              {`{{1}}`} se reemplaza con el nombre del contacto al enviar. Podés usar *negrita* y _cursiva_.
+
+            {/* ── Chips para insertar variables ── */}
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
+              <span className="text-[10px] text-gray-500 uppercase tracking-wider shrink-0">Insertar variable:</span>
+              {VARIABLE_SOURCES.map((src) => (
+                <button
+                  key={src.key}
+                  type="button"
+                  onClick={() => insertVariable(src.key)}
+                  className="text-xs px-2.5 py-1 rounded-full border border-accent/40 text-accent hover:bg-accent/10 transition-colors"
+                >
+                  + {src.label}
+                </button>
+              ))}
+            </div>
+
+            {/* ── Leyenda de variables detectadas ── */}
+            {detectedVars.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                {detectedVars.map((n) => {
+                  const srcKey = varLegend[n - 1];
+                  const srcLabel = VARIABLE_SOURCES.find((s) => s.key === srcKey)?.label ?? '—';
+                  return (
+                    <span key={n} className="text-[11px] text-gray-400">
+                      <span className="font-mono text-accent">{`{{${n}}}`}</span>
+                      {' '}= {srcLabel}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
+            <p className="text-[10px] text-gray-600 mt-1">
+              Podés usar *negrita* y _cursiva_. Las variables se reemplazan con los datos del contacto al enviar.
             </p>
           </div>
 
