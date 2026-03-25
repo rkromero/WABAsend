@@ -65,19 +65,21 @@ router.get('/overview', async (req, res) => {
     const defaultHasta = hasta ? new Date(hasta) : new Date();
 
     const [funnelRes, convRes] = await Promise.all([
-      // Funnel: agregar por rango sobre la fecha de envío real (sent_at) de los logs
+      // Funnel: filtrar por c.scheduled_at (nunca NULL) en lugar de ml.sent_at (puede ser NULL).
+      // Para la ventana de 48h del "respondieron" usamos COALESCE(ml.sent_at, c.scheduled_at).
       query(
         `SELECT
            COUNT(*)                                          AS enviados,
-           COUNT(*) FILTER (WHERE status = 'delivered')     AS entregados,
-           COUNT(*) FILTER (WHERE status = 'read')          AS leidos,
+           COUNT(*) FILTER (WHERE ml.status = 'delivered')  AS entregados,
+           COUNT(*) FILTER (WHERE ml.status = 'read')       AS leidos,
            COUNT(DISTINCT im.telefono)                      AS respondieron
-         FROM waba_message_logs ml
+         FROM waba_campaigns c
+         JOIN waba_message_logs ml ON ml.campaign_id = c.id
          LEFT JOIN incoming_messages im
            ON im.telefono = ml.telefono
-          AND im.created_at >= ml.sent_at
-          AND im.created_at <= ml.sent_at + INTERVAL '48 hours'
-         WHERE ml.sent_at >= $1 AND ml.sent_at <= $2
+          AND im.created_at >= COALESCE(ml.sent_at, c.scheduled_at)
+          AND im.created_at <= COALESCE(ml.sent_at, c.scheduled_at) + INTERVAL '48 hours'
+         WHERE c.scheduled_at >= $1 AND c.scheduled_at <= $2
            AND ml.status != 'failed'`,
         [defaultDesde, defaultHasta]
       ),
