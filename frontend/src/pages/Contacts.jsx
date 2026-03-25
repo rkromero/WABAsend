@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, Search, Trash2, Upload, ChevronLeft, ChevronRight, Tag, Edit2, Check, X, AlertTriangle, Wand2, History, MessageSquare, Megaphone, Zap, ArrowDownLeft, Loader2 } from 'lucide-react';
+import { Users, Search, Trash2, Upload, ChevronLeft, ChevronRight, Tag, Edit2, Check, X, AlertTriangle, Wand2, History, MessageSquare, Megaphone, Zap, ArrowDownLeft, Loader2, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format, formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
+import * as XLSX from 'xlsx';
 import api from '../lib/api.js';
 import ExcelUploader from '../components/ExcelUploader.jsx';
 
@@ -17,6 +18,7 @@ export default function Contacts() {
   const [showUpload, setShowUpload] = useState(false);
   const [deleting, setDeleting]         = useState(null);
   const [normalizing, setNormalizing]   = useState(false);
+  const [exporting, setExporting]       = useState(false);
   const [editingPhone, setEditingPhone] = useState(null); // id del contacto en edición
   const [phoneValue, setPhoneValue]     = useState('');
   const [savingPhone, setSavingPhone]   = useState(false);
@@ -63,6 +65,56 @@ export default function Contacts() {
 
   function handleSegmento(seg) {
     setSegmento((prev) => (prev === seg ? '' : seg));
+  }
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      // Traer todos los contactos respetando el filtro activo (sin paginación)
+      const r = await api.get('/contacts', {
+        params: {
+          limit: 10000,
+          search:   search   || undefined,
+          segmento: segmento || undefined,
+        },
+      });
+
+      const rows = r.data.contacts.map((c) => ({
+        nombre:    c.nombre,
+        telefono:  c.telefono,
+        email:     c.email    || '',
+        segmento:  c.segmento || '',
+        importado: format(new Date(c.created_at), 'dd/MM/yyyy', { locale: es }),
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(rows, {
+        header: ['nombre', 'telefono', 'email', 'segmento', 'importado'],
+      });
+
+      // Encabezados legibles en la primera fila
+      ws['A1'].v = 'Nombre';
+      ws['B1'].v = 'Teléfono';
+      ws['C1'].v = 'Email';
+      ws['D1'].v = 'Segmento';
+      ws['E1'].v = 'Importado';
+
+      // Anchos de columna
+      ws['!cols'] = [{ wch: 30 }, { wch: 18 }, { wch: 35 }, { wch: 20 }, { wch: 14 }];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Contactos');
+
+      const filename = segmento
+        ? `contactos_${segmento.replace(/\s+/g, '_')}.xlsx`
+        : 'contactos.xlsx';
+
+      XLSX.writeFile(wb, filename);
+      toast.success(`${rows.length} contacto${rows.length !== 1 ? 's' : ''} exportado${rows.length !== 1 ? 's' : ''}`);
+    } catch (err) {
+      toast.error(err.message || 'Error al exportar');
+    } finally {
+      setExporting(false);
+    }
   }
 
   async function handleNormalize() {
@@ -185,6 +237,15 @@ export default function Contacts() {
           >
             <Wand2 size={14} className={normalizing ? 'animate-spin' : ''} />
             {normalizing ? 'Normalizando...' : 'Normalizar teléfonos'}
+          </button>
+          <button
+            onClick={handleExport}
+            disabled={exporting || total === 0}
+            className="btn-secondary"
+            title={segmento ? `Exportar contactos del segmento "${segmento}"` : 'Exportar todos los contactos a Excel'}
+          >
+            <Download size={14} className={exporting ? 'animate-bounce' : ''} />
+            {exporting ? 'Exportando...' : 'Exportar Excel'}
           </button>
           <button
             onClick={() => setShowUpload((v) => !v)}
