@@ -23,6 +23,75 @@ import crypto from 'crypto';
 import { query } from '../db/index.js';
 import { processWooEvent } from '../services/automations.js';
 
+/**
+ * Ventana de atribución de follow-up → conversión: 3 días.
+ * Si el usuario recibió un follow-up y compra dentro de este plazo,
+ * la orden se atribuye al follow-up.
+ */
+const FOLLOWUP_ATTRIBUTION_DAYS = 3;
+
+/**
+ * Normaliza un número de teléfono a sus últimos 10 dígitos.
+ * Permite comparar formatos distintos (ej: "011-4866-7180" vs "5491134866718").
+ *
+ * @param {string} phone - Teléfono en cualquier formato
+ * @returns {string|null} Últimos 10 dígitos, o null si tiene menos de 8 dígitos
+ */
+function normalizePhoneSuffix(phone) {
+  if (!phone) return null;
+  const digits = String(phone).replace(/\D/g, '');
+  return digits.length >= 8 ? digits.slice(-10) : null;
+}
+
+/**
+ * Verifica si el teléfono de la orden pertenece a alguien que recibió
+ * un follow-up en los últimos FOLLOWUP_ATTRIBUTION_DAYS días.
+ * Si hay match, registra la conversión en waba_followup_conversions.
+ *
+ * @param {Object} order - Body de la orden de WooCommerce
+ */
+async function trackFollowupConversion(order) {
+  const billingPhone = order?.billing?.phone;
+  const suffix = normalizePhoneSuffix(billingPhone);
+  if (!suffix) return;
+
+  const orderId     = order.id;
+  const orderAmount = parseFloat(order.total) || 0;
+
+  try {
+    // Buscar follow-up enviado recientemente cuyo teléfono termina en los mismos 10 dígitos
+    const followupResult = await query(
+      `SELECT id, telefono
+       FROM waba_conversation_followups
+       WHERE status = 'sent'
+         AND sent_at > NOW() - ($1 || ' days')::INTERVAL
+         AND RIGHT(telefono, 10) = $2
+       ORDER BY sent_at DESC
+       LIMIT 1`,
+      [FOLLOWUP_ATTRIBUTION_DAYS, suffix]
+    );
+
+    if (followupResult.rows.length === 0) return; // No hay follow-up atribuible
+
+    const followup = followupResult.rows[0];
+
+    // Insertar conversión (ON CONFLICT NO-OP si el mismo pedido ya fue registrado)
+    await query(
+      `INSERT INTO waba_followup_conversions (followup_id, telefono, woo_order_id, order_amount)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (woo_order_id) DO NOTHING`,
+      [followup.id, followup.telefono, orderId, orderAmount]
+    );
+
+    console.log(
+      `[WooWebhook] Conversión follow-up atribuida: orden #${orderId} ($${orderAmount}) → ${followup.telefono}`
+    );
+  } catch (err) {
+    // No interrumpir el flujo si falla el tracking
+    console.error('[WooWebhook] Error al registrar conversión follow-up:', err.message);
+  }
+}
+
 const router = Router();
 
 /**
@@ -88,6 +157,11 @@ router.post('/', async (req, res) => {
       if (!EVENTOS_SOPORTADOS.includes(eventoNormalizado)) {
         console.log(`[WooWebhook] Evento "${topic}" (status: ${req.body?.status}) sin automatizaciones`);
         return;
+      }
+
+      // Atribuir conversiones a follow-ups cuando llega cualquier pedido nuevo
+      if (eventoNormalizado === 'order.created' || eventoNormalizado === 'order.completed') {
+        await trackFollowupConversion(req.body);
       }
 
       await processWooEvent(eventoNormalizado, req.body);

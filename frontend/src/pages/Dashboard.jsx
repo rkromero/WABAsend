@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   Users, Send, CheckCircle,
   Eye, Truck, XCircle, ArrowRight, Zap,
-  TrendingUp, ShoppingBag, RefreshCw,
+  TrendingUp, ShoppingBag, RefreshCw, MessageCircle,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../lib/api.js';
@@ -56,19 +56,22 @@ export default function Dashboard() {
   const [stats, setStats]               = useState(null);
   const [contacts, setContacts]         = useState(0);
   const [campaigns, setCampaigns]       = useState([]);
+  const [followupConv, setFollowupConv] = useState(null);
   const [loading, setLoading]           = useState(true);
   const [checkingConversions, setCheckingConversions] = useState(false);
 
   async function fetchData() {
     try {
-      const [statsRes, contactsRes, campaignsRes] = await Promise.all([
+      const [statsRes, contactsRes, campaignsRes, followupRes] = await Promise.all([
         api.get('/campaigns/stats'),
         api.get('/contacts/count'),
         api.get('/campaigns'),
+        api.get('/automations/followup').catch(() => null),
       ]);
       setStats(statsRes.data);
       setContacts(contactsRes.data.total);
       setCampaigns(campaignsRes.data.slice(0, 5));
+      if (followupRes) setFollowupConv(followupRes.data.conversions);
     } catch {
       // Silencioso en polling
     } finally {
@@ -218,6 +221,48 @@ export default function Dashboard() {
             color="purple"
           />
         </div>
+
+        {/* Conversiones atribuidas a follow-up */}
+        {followupConv && (
+          <div className="mt-4 glass-card p-5 border border-blue-500/20 bg-blue-500/5 animate-fade-in">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-lg border text-blue-400 bg-blue-400/10 border-blue-400/20">
+                  <MessageCircle size={18} />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
+                    Pedidos por mensaje de seguimiento
+                  </p>
+                  <div className="flex items-baseline gap-3">
+                    <p className="text-3xl font-display font-bold text-blue-400">
+                      {followupConv.conversions_last_30d || 0}
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      últimos 30 días
+                    </p>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {parseInt(followupConv.total_conversions) > 0
+                      ? `${followupConv.total_conversions} total · $${Number(followupConv.total_revenue).toLocaleString('es-AR')} atribuidos`
+                      : 'Aún no hay pedidos atribuidos a seguimientos'}
+                  </p>
+                </div>
+              </div>
+              {parseInt(followupConv.revenue_last_30d) > 0 && (
+                <div className="text-right shrink-0">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Revenue 30d</p>
+                  <p className="text-xl font-display font-bold text-blue-400">
+                    ${Number(followupConv.revenue_last_30d).toLocaleString('es-AR')}
+                  </p>
+                </div>
+              )}
+            </div>
+            <p className="text-[11px] text-gray-600 mt-3">
+              Pedido de WooCommerce realizado dentro de los 3 días posteriores a recibir un mensaje de seguimiento.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Campañas recientes */}
