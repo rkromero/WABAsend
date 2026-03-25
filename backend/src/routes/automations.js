@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { query } from '../db/index.js';
 import { processAutomationQueue } from '../services/automations.js';
 import { getFollowupConfig, saveFollowupConfig, processFollowups } from '../services/followup.js';
+import { sendFreeTextMessage } from '../services/whatsapp.js';
 
 const router = Router();
 
@@ -131,8 +132,34 @@ router.put('/followup', async (req, res) => {
   }
 });
 
-// POST /api/automations/followup/process — forzar ciclo de follow-up (testing)
+// POST /api/automations/followup/process — forzar ciclo de follow-up
+// Body opcional: { test_telefono: "5491134866718" } para enviar directamente
+// a un número específico sin respetar el filtro de tiempo (solo para testing).
 router.post('/followup/process', async (req, res) => {
+  const testTelefono = req.body?.test_telefono;
+
+  if (testTelefono) {
+    // Modo test: enviar directamente al número indicado, ignorando ventana de tiempo
+    try {
+      const config = await getFollowupConfig();
+
+      await sendFreeTextMessage(testTelefono, config.mensaje);
+
+      // Registrar en la tabla de seguimientos para que el cooldown funcione correctamente
+      await query(
+        `INSERT INTO waba_conversation_followups (telefono, status) VALUES ($1, 'sent')`,
+        [testTelefono]
+      );
+
+      console.log(`[Followup] Test enviado a ${testTelefono}`);
+      res.json({ success: true, message: `Follow-up de prueba enviado a ${testTelefono}` });
+    } catch (err) {
+      console.error('[Followup] Error en test:', err.message);
+      res.status(500).json({ success: false, error: err.message });
+    }
+    return;
+  }
+
   try {
     await processFollowups();
     res.json({ success: true, message: 'Ciclo de follow-up ejecutado' });
