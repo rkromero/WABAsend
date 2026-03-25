@@ -47,6 +47,7 @@ async function executeCampaign(campaign) {
   // Detectar si la plantilla tiene variables ({{1}}) para no mandar parameters de más.
   // Meta devuelve error #132000 si se envían parameters a una plantilla sin variables.
   let hasVariables = true;
+  let templateBodyText = ''; // Texto del cuerpo de la plantilla para contexto del bot
   try {
     const allTemplates = await fetchTemplates();
     const tpl = allTemplates.find(
@@ -54,10 +55,12 @@ async function executeCampaign(campaign) {
     );
     const bodyComp = tpl?.components?.find((c) => c.type === 'BODY');
     hasVariables = bodyComp ? /\{\{\d+\}\}/.test(bodyComp.text || '') : false;
+    templateBodyText = bodyComp?.text || campaign.template_name;
     console.log(`[Scheduler] Plantilla "${campaign.template_name}" hasVariables=${hasVariables}`);
   } catch (err) {
     // Si no se puede verificar, asumir false para evitar el error #132000
     hasVariables = false;
+    templateBodyText = campaign.template_name;
     console.warn(`[Scheduler] No se pudo verificar variables de plantilla: ${err.message}. Asumiendo sin variables.`);
   }
 
@@ -81,6 +84,22 @@ async function executeCampaign(campaign) {
          WHERE id = $2`,
         [messageId, log.id]
       );
+
+      // Guardar ventana de contexto de campaña para que el bot pueda responder
+      // en el contexto correcto si la persona responde dentro de las 48h.
+      // ON CONFLICT: si la misma campaña ya tiene una ventana para este teléfono, no duplicar.
+      try {
+        await query(
+          `INSERT INTO waba_campaign_reply_window
+             (telefono, campaign_id, campaign_nombre, template_name, template_body, expires_at)
+           VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '48 hours')
+           ON CONFLICT DO NOTHING`,
+          [log.telefono, campaign.id, campaign.nombre, campaign.template_name, templateBodyText]
+        );
+      } catch (winErr) {
+        // No crítico — el bot funcionará sin contexto de campaña si falla
+        console.warn(`[Scheduler] No se pudo guardar ventana de campaña para ${log.telefono}: ${winErr.message}`);
+      }
 
       sentCount++;
       console.log(`[Scheduler] ✓ Enviado a ${log.telefono} (msgId: ${messageId})`);

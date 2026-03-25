@@ -145,7 +145,30 @@ async function processIncomingMessage({ telefono, nombre, messageText, waMessage
       // Recuperar historial completo (user + assistant) de los últimos 24h / 20 mensajes
       const conversationHistory = await getConversationHistory(telefono);
 
-      const rawBotResponse = await generateBotResponse(messageText, conversationHistory);
+      // Verificar si la persona está respondiendo a una campaña saliente reciente.
+      // Si existe una ventana activa (enviada en las últimas 48h), inyectamos el contexto
+      // de esa campaña en el prompt para que el bot responda en la línea correcta.
+      let campaignContext = null;
+      try {
+        const cwResult = await query(
+          `SELECT campaign_nombre, template_body
+           FROM waba_campaign_reply_window
+           WHERE telefono = $1 AND expires_at > NOW()
+           ORDER BY sent_at DESC
+           LIMIT 1`,
+          [telefono]
+        );
+        if (cwResult.rows.length > 0) {
+          const row = cwResult.rows[0];
+          campaignContext = { campaignNombre: row.campaign_nombre, templateBody: row.template_body };
+          console.log(`[Bot] Contexto de campaña detectado para ${telefono}: "${row.campaign_nombre}"`);
+        }
+      } catch (cwErr) {
+        // No crítico — el bot funciona sin contexto de campaña
+        console.warn('[Bot] No se pudo consultar contexto de campaña:', cwErr.message);
+      }
+
+      const rawBotResponse = await generateBotResponse(messageText, conversationHistory, campaignContext);
 
       // Validar que ninguna URL de la respuesta sea una alucinación:
       // si el bot inventó un permalink que no existe en el catálogo, reemplazamos la respuesta.

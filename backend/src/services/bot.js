@@ -181,14 +181,17 @@ function formatProductsForPrompt(products) {
  *
  * Flujo:
  *  1. Buscar productos relevantes según el mensaje del usuario
- *  2. Armar el system prompt con las instrucciones + productos encontrados
+ *  2. Armar el system prompt con las instrucciones + contexto de campaña (si aplica) + productos
  *  3. Llamar a GPT con el historial + mensaje actual
  *
  * @param {string} userMessage           - Mensaje actual del usuario
  * @param {Array<{role: string, content: string}>} conversationHistory - Últimos mensajes previos
+ * @param {{ campaignNombre: string, templateBody: string }|null} campaignContext
+ *   - Si la persona está respondiendo a una campaña reciente, este objeto contiene
+ *     el nombre y el texto del mensaje de campaña que recibió.
  * @returns {Promise<string>} Texto de la respuesta generada
  */
-export async function generateBotResponse(userMessage, conversationHistory = []) {
+export async function generateBotResponse(userMessage, conversationHistory = [], campaignContext = null) {
   const config = await getBotConfig();
 
   if (!process.env.OPENAI_API_KEY) {
@@ -236,8 +239,14 @@ export async function generateBotResponse(userMessage, conversationHistory = [])
   // en el bloque PRODUCTOS DISPONIBLES EN STOCK. Cualquier URL inventada será interceptada.
   const antiHallucinationRule = '\n\nREGLA IMPORTANTE: Solo podés incluir links/URLs de productos que aparezcan EXACTAMENTE en la lista de PRODUCTOS DISPONIBLES EN STOCK que se te proporcionó. Nunca inventes ni construyas URLs. Si no tenés el link del producto en la lista, describí el producto sin incluir link.';
 
-  // System prompt = instrucciones del usuario + conocimiento + productos disponibles + regla anti-alucinación
-  const systemPrompt = config.prompt + knowledgeContext + productosContext + antiHallucinationRule;
+  // Contexto de campaña: si la persona está respondiendo a un mensaje saliente,
+  // le indicamos al bot de qué trataba ese mensaje para que responda en esa línea.
+  const campaignBlock = campaignContext
+    ? `\n\nCONTEXTO DE CAMPAÑA:\nEsta persona recibió recientemente la campaña "${campaignContext.campaignNombre}" con el siguiente mensaje:\n"${campaignContext.templateBody}"\n\nRespondé teniendo en cuenta ese contexto. Si era una campaña de reactivación, recibimiento o novedad, respondé con entusiasmo y continuá la conversación en esa línea antes de ofrecer productos.`
+    : '';
+
+  // System prompt = instrucciones del usuario + contexto de campaña + conocimiento + productos disponibles + regla anti-alucinación
+  const systemPrompt = config.prompt + campaignBlock + knowledgeContext + productosContext + antiHallucinationRule;
 
   const response = await openai.chat.completions.create({
     model: 'gpt-4o-mini',

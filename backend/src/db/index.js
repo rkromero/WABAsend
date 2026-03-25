@@ -429,7 +429,30 @@ export async function initSchema() {
       ON waba_conversation_followups(telefono, sent_at DESC);
   `);
 
-  // 9. Conversiones atribuidas a follow-ups (ventana de 3 días)
+  // 9b. Ventana de contexto de campaña — para que el bot responda con el contexto correcto
+  // cuando alguien responde a una campaña saliente dentro de las 48h siguientes al envío.
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS waba_campaign_reply_window (
+        id               SERIAL PRIMARY KEY,
+        telefono         VARCHAR(20)   NOT NULL,
+        campaign_id      INT REFERENCES waba_campaigns(id) ON DELETE CASCADE,
+        campaign_nombre  VARCHAR(255),
+        template_name    VARCHAR(255)  NOT NULL,
+        template_body    TEXT          NOT NULL,
+        sent_at          TIMESTAMP     DEFAULT NOW(),
+        expires_at       TIMESTAMP     NOT NULL
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_waba_crw_telefono_expires
+        ON waba_campaign_reply_window(telefono, expires_at DESC)
+    `);
+  } catch (err) {
+    console.warn('[DB] waba_campaign_reply_window migration warning:', err.message.split('\n')[0]);
+  }
+
+  // 10. Conversiones atribuidas a follow-ups (ventana de 3 días)
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS waba_followup_conversions (
