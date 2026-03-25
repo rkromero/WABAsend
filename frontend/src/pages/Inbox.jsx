@@ -28,6 +28,8 @@ import {
   Music,
   Image as ImageIcon,
   Braces,
+  Tag,
+  ChevronDown,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format, formatDistanceToNow, parseISO } from 'date-fns';
@@ -48,6 +50,31 @@ function getInitials(name = '') {
 }
 
 /** Formatea un timestamp Unix o ISO string para mostrar en la lista */
+// ── Constantes de etiquetas ──────────────────────────────────────────────────
+
+const PRESET_TAGS = [
+  { key: 'urgente',     label: 'Urgente'     },
+  { key: 'reclamo',     label: 'Reclamo'     },
+  { key: 'presupuesto', label: 'Presupuesto' },
+  { key: 'pedido',      label: 'Pedido'      },
+  { key: 'seguimiento', label: 'Seguimiento' },
+];
+
+const TAG_COLORS = {
+  urgente:     'text-red-400 bg-red-400/10 border-red-400/30',
+  reclamo:     'text-orange-400 bg-orange-400/10 border-orange-400/30',
+  presupuesto: 'text-yellow-400 bg-yellow-400/10 border-yellow-400/30',
+  pedido:      'text-blue-400 bg-blue-400/10 border-blue-400/30',
+  seguimiento: 'text-purple-400 bg-purple-400/10 border-purple-400/30',
+};
+
+function getTagStyle(tag) {
+  return TAG_COLORS[tag] || 'text-gray-400 bg-gray-400/10 border-gray-400/30';
+}
+function getTagLabel(tag) {
+  return PRESET_TAGS.find((t) => t.key === tag)?.label || tag;
+}
+
 function formatTimestamp(ts) {
   if (!ts) return '';
   try {
@@ -97,14 +124,12 @@ function MessageSkeleton() {
 }
 
 /** Una fila en la lista de conversaciones */
-function ConversationItem({ conversation, isActive, onClick }) {
+function ConversationItem({ conversation, isActive, onClick, tags }) {
   const contact = conversation.meta?.sender || {};
   const name = contact.name || contact.phone_number || 'Desconocido';
   const phone = contact.phone_number || '';
   const lastMessage = conversation.last_activity_at;
   const unreadCount = conversation.unread_count || 0;
-
-  // Último mensaje del preview
   const preview = conversation.last_non_activity_message?.content || '';
 
   return (
@@ -133,6 +158,19 @@ function ConversationItem({ conversation, isActive, onClick }) {
             </span>
           )}
         </div>
+        {/* Tags de la conversación */}
+        {tags && tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {tags.map((tag) => (
+              <span
+                key={tag}
+                className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full border ${getTagStyle(tag)}`}
+              >
+                {getTagLabel(tag)}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </button>
   );
@@ -297,10 +335,15 @@ export default function Inbox() {
   const fileInputRef = useRef(null);
 
   // ── Panel de variables ────────────────────────────────────────────────────
-  // Permite insertar valores del contacto activo (nombre, teléfono, pedidos) al cursor
   const [showVarsPanel, setShowVarsPanel]   = useState(false);
-  const [wooStats, setWooStats]             = useState(null);  // { cantidadPedidos, fechaUltimoPedido }
+  const [wooStats, setWooStats]             = useState(null);
   const [loadingWooStats, setLoadingWooStats] = useState(false);
+
+  // ── Etiquetas de conversación ─────────────────────────────────────────────
+  const [allTags, setAllTags]             = useState({});  // { [convId]: string[] }
+  const [tagFilter, setTagFilter]         = useState(null);
+  const [showTagAdd, setShowTagAdd]       = useState(false);
+  const [newTagInput, setNewTagInput]     = useState('');
 
   const messagesEndRef    = useRef(null);
   const inputRef          = useRef(null);
@@ -351,9 +394,9 @@ export default function Inbox() {
    */
   function openConversation(convId) {
     setActiveConvId(convId);
-    // Resetear cache de stats WooCommerce al cambiar de conversación
     setWooStats(null);
     setShowVarsPanel(false);
+    setShowTagAdd(false);
 
     // Optimistic update: zerear unread_count para que el badge desaparezca al instante
     setConversations((prev) =>
@@ -365,7 +408,7 @@ export default function Inbox() {
   }
 
   usePolling(fetchConversations, 4000, true);
-  useEffect(() => { fetchConversations(); }, []); // eslint-disable-line
+  useEffect(() => { fetchConversations(); fetchAllTags(); }, []); // eslint-disable-line
 
   // ── Fetch mensajes de la conversación activa ──────────────────────────────
 
@@ -601,9 +644,58 @@ export default function Inbox() {
     inputRef.current?.focus();
   }
 
+  // ── Etiquetas ─────────────────────────────────────────────────────────────
+
+  async function fetchAllTags() {
+    try {
+      const res = await api.get('/inbox/tags');
+      setAllTags(res.data?.data || {});
+    } catch { /* silencioso */ }
+  }
+
+  async function addTag(tag) {
+    if (!activeConvId || !tag.trim()) return;
+    const tagClean = tag.trim().toLowerCase().replace(/\s+/g, '_').substring(0, 50);
+    try {
+      await api.post(`/inbox/conversations/${activeConvId}/tags`, { tag: tagClean });
+      setAllTags((prev) => ({
+        ...prev,
+        [activeConvId]: [...new Set([...(prev[activeConvId] || []), tagClean])],
+      }));
+      setNewTagInput('');
+      setShowTagAdd(false);
+    } catch (err) {
+      toast.error(err.message || 'Error al agregar tag');
+    }
+  }
+
+  async function removeTag(tag) {
+    if (!activeConvId) return;
+    try {
+      await api.delete(`/inbox/conversations/${activeConvId}/tags/${tag}`);
+      setAllTags((prev) => ({
+        ...prev,
+        [activeConvId]: (prev[activeConvId] || []).filter((t) => t !== tag),
+      }));
+    } catch (err) {
+      toast.error(err.message || 'Error al eliminar tag');
+    }
+  }
+
+  // Tags de la conversación activa
+  const activeTags = allTags[activeConvId] || [];
+  // Tags predefinidos que aún no están aplicados a la conversación activa
+  const availablePresetTags = PRESET_TAGS.filter((t) => !activeTags.includes(t.key));
+  // Tags únicos que existen en alguna conversación (para el filtro del sidebar)
+  const allTagKeys = [...new Set(Object.values(allTags).flat())];
+
   // ── Filtro de búsqueda ────────────────────────────────────────────────────
 
   const filtered = conversations.filter((conv) => {
+    if (tagFilter) {
+      const tags = allTags[conv.id] || [];
+      if (!tags.includes(tagFilter)) return false;
+    }
     if (!search) return true;
     const name = conv.meta?.sender?.name || '';
     const phone = conv.meta?.sender?.phone_number || '';
@@ -647,6 +739,35 @@ export default function Inbox() {
               className="w-full pl-8 pr-3 py-2 bg-base-elevated border border-base-border rounded-lg text-sm text-gray-300 placeholder-gray-600 focus:outline-none focus:border-accent/40"
             />
           </div>
+
+          {/* Filtro por tags — solo se muestra cuando hay tags en uso */}
+          {allTagKeys.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              <button
+                onClick={() => setTagFilter(null)}
+                className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
+                  tagFilter === null
+                    ? 'bg-accent/20 border-accent/40 text-accent'
+                    : 'bg-base-elevated border-base-border text-gray-500 hover:text-gray-300'
+                }`}
+              >
+                Todos
+              </button>
+              {allTagKeys.map((key) => (
+                <button
+                  key={key}
+                  onClick={() => setTagFilter(tagFilter === key ? null : key)}
+                  className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
+                    tagFilter === key
+                      ? getTagStyle(key)
+                      : 'bg-base-elevated border-base-border text-gray-500 hover:text-gray-300'
+                  }`}
+                >
+                  {getTagLabel(key)}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Lista */}
@@ -667,6 +788,7 @@ export default function Inbox() {
                 conversation={conv}
                 isActive={conv.id === activeConvId}
                 onClick={() => openConversation(conv.id)}
+                tags={allTags[conv.id] || []}
               />
             ))
           )}
@@ -679,37 +801,102 @@ export default function Inbox() {
         {activeConvId ? (
           <>
             {/* Header de la conversación */}
-            <div className="px-5 py-4 border-b border-base-border bg-base-surface flex items-center gap-3 shrink-0">
-              <div className="w-9 h-9 rounded-full bg-base-elevated border border-base-border flex items-center justify-center shrink-0">
-                <span className="text-xs font-medium text-gray-300">{getInitials(activeName)}</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-white truncate">{activeName}</p>
-                {activePhone && (
-                  <p className="text-xs text-gray-500 flex items-center gap-1">
-                    <Phone size={10} />
-                    {activePhone}
-                  </p>
-                )}
+            <div className="px-5 py-3 border-b border-base-border bg-base-surface shrink-0">
+              {/* Fila 1: avatar + nombre + botón bot */}
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-base-elevated border border-base-border flex items-center justify-center shrink-0">
+                  <span className="text-xs font-medium text-gray-300">{getInitials(activeName)}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-white truncate">{activeName}</p>
+                  {activePhone && (
+                    <p className="text-xs text-gray-500 flex items-center gap-1">
+                      <Phone size={10} />
+                      {activePhone}
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={handleToggleBot}
+                  disabled={togglingBot}
+                  title={botPaused ? 'Devolver al bot' : 'Tomar conversación (pausar bot)'}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shrink-0 disabled:opacity-50 ${
+                    botPaused
+                      ? 'bg-accent/10 border border-accent/30 text-accent hover:bg-accent/20'
+                      : 'bg-orange-500/10 border border-orange-500/30 text-orange-400 hover:bg-orange-500/20'
+                  }`}
+                >
+                  {botPaused ? <><Bot size={13} /> Devolver al bot</> : <><UserCheck size={13} /> Tomar conversación</>}
+                </button>
               </div>
 
-              {/* Botón takeover / release */}
-              <button
-                onClick={handleToggleBot}
-                disabled={togglingBot}
-                title={botPaused ? 'Devolver al bot' : 'Tomar conversación (pausar bot)'}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shrink-0 disabled:opacity-50 ${
-                  botPaused
-                    ? 'bg-accent/10 border border-accent/30 text-accent hover:bg-accent/20'
-                    : 'bg-orange-500/10 border border-orange-500/30 text-orange-400 hover:bg-orange-500/20'
-                }`}
-              >
-                {botPaused ? (
-                  <><Bot size={13} /> Devolver al bot</>
-                ) : (
-                  <><UserCheck size={13} /> Tomar conversación</>
-                )}
-              </button>
+              {/* Fila 2: tags actuales + botón agregar */}
+              <div className="flex items-center gap-2 mt-2 flex-wrap">
+                {activeTags.map((tag) => (
+                  <span
+                    key={tag}
+                    className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border ${getTagStyle(tag)}`}
+                  >
+                    {getTagLabel(tag)}
+                    <button
+                      onClick={() => removeTag(tag)}
+                      className="opacity-60 hover:opacity-100 transition-opacity ml-0.5"
+                    >
+                      <X size={9} />
+                    </button>
+                  </span>
+                ))}
+
+                {/* Dropdown para agregar tag */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowTagAdd((v) => !v)}
+                    className="inline-flex items-center gap-1 text-[10px] text-gray-500 hover:text-gray-300 border border-dashed border-gray-700 hover:border-gray-500 px-2 py-0.5 rounded-full transition-colors"
+                  >
+                    <Tag size={9} />
+                    Agregar tag
+                    <ChevronDown size={9} />
+                  </button>
+
+                  {showTagAdd && (
+                    <div className="absolute top-full left-0 mt-1 z-20 bg-base-surface border border-base-border rounded-xl shadow-xl w-52 overflow-hidden">
+                      {/* Tags predefinidos no aplicados */}
+                      {availablePresetTags.length > 0 && (
+                        <div className="p-2 space-y-0.5">
+                          {availablePresetTags.map((t) => (
+                            <button
+                              key={t.key}
+                              onClick={() => addTag(t.key)}
+                              className={`w-full text-left px-2 py-1.5 rounded-lg text-xs flex items-center gap-2 hover:bg-white/[0.05] transition-colors`}
+                            >
+                              <span className={`w-2 h-2 rounded-full border ${getTagStyle(t.key)}`} />
+                              <span className="text-gray-300">{t.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {/* Separador + input para tag custom */}
+                      {availablePresetTags.length > 0 && (
+                        <div className="border-t border-base-border" />
+                      )}
+                      <div className="p-2">
+                        <input
+                          autoFocus
+                          className="w-full px-2 py-1.5 bg-base-elevated border border-base-border rounded-lg text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-accent/40"
+                          placeholder="Tag personalizado..."
+                          value={newTagInput}
+                          onChange={(e) => setNewTagInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && newTagInput.trim()) addTag(newTagInput);
+                            if (e.key === 'Escape') setShowTagAdd(false);
+                          }}
+                        />
+                        <p className="text-[9px] text-gray-600 mt-1">Enter para agregar · Esc para cerrar</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Área de mensajes */}

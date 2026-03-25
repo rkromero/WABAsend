@@ -518,6 +518,25 @@ export async function initSchema() {
     console.warn('[DB] waba_optouts migration warning:', err.message.split('\n')[0]);
   }
 
+  // 12. Etiquetas de conversaciones — tags por conversación de Chatwoot
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS waba_conversation_tags (
+        id                      SERIAL PRIMARY KEY,
+        conversacion_chatwoot_id INTEGER NOT NULL,
+        tag                     VARCHAR(50) NOT NULL,
+        created_at              TIMESTAMP DEFAULT NOW(),
+        UNIQUE(conversacion_chatwoot_id, tag)
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_waba_conv_tags_conv_id
+        ON waba_conversation_tags(conversacion_chatwoot_id)
+    `);
+  } catch (err) {
+    console.warn('[DB] waba_conversation_tags migration warning:', err.message.split('\n')[0]);
+  }
+
   console.log('[DB] Esquema inicializado correctamente');
 }
 

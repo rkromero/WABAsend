@@ -308,6 +308,75 @@ router.post('/conversations/:id/media', upload.single('file'), async (req, res) 
   }
 });
 
+// ── Etiquetas de conversación ──────────────────────────────────────────────
+
+// GET /api/inbox/tags — todos los tags de todas las conversaciones, agrupados por convId
+// Permite al frontend cargar el mapa completo en una sola request al inicio.
+router.get('/tags', async (req, res) => {
+  try {
+    const result = await query(
+      'SELECT conversacion_chatwoot_id, tag FROM waba_conversation_tags ORDER BY created_at ASC'
+    );
+    const grouped = {};
+    for (const row of result.rows) {
+      const cid = row.conversacion_chatwoot_id;
+      if (!grouped[cid]) grouped[cid] = [];
+      grouped[cid].push(row.tag);
+    }
+    res.json({ success: true, data: grouped });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/inbox/conversations/:id/tags — agregar un tag a una conversación
+// Body: { tag: string }
+router.post('/conversations/:id/tags', async (req, res) => {
+  const conversationId = parseInt(req.params.id);
+  if (isNaN(conversationId)) {
+    return res.status(400).json({ success: false, error: 'ID inválido' });
+  }
+
+  const rawTag = req.body?.tag;
+  if (!rawTag?.trim()) {
+    return res.status(400).json({ success: false, error: 'tag es requerido' });
+  }
+
+  // Normalizar: minúsculas, espacios → guion bajo, máx 50 chars
+  const tag = rawTag.trim().toLowerCase().replace(/\s+/g, '_').substring(0, 50);
+
+  try {
+    await query(
+      `INSERT INTO waba_conversation_tags (conversacion_chatwoot_id, tag)
+       VALUES ($1, $2)
+       ON CONFLICT (conversacion_chatwoot_id, tag) DO NOTHING`,
+      [conversationId, tag]
+    );
+    res.json({ success: true, data: { tag } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/inbox/conversations/:id/tags/:tag — eliminar un tag
+router.delete('/conversations/:id/tags/:tag', async (req, res) => {
+  const conversationId = parseInt(req.params.id);
+  const tag = req.params.tag;
+  if (isNaN(conversationId) || !tag) {
+    return res.status(400).json({ success: false, error: 'Parámetros inválidos' });
+  }
+
+  try {
+    await query(
+      'DELETE FROM waba_conversation_tags WHERE conversacion_chatwoot_id = $1 AND tag = $2',
+      [conversationId, tag]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ── Mensajes rápidos ──────────────────────────────────────────────────────
 
 // GET /api/inbox/quick-replies
