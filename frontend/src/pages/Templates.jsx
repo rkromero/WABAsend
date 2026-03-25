@@ -85,11 +85,16 @@ function TemplateCard({ template }) {
 
 // Variables disponibles para insertar en el template
 const VARIABLE_SOURCES = [
-  { label: 'Nombre',    key: 'nombre',    example: 'Juan'              },
-  { label: 'Teléfono',  key: 'telefono',  example: '1123456789'        },
-  { label: 'Email',     key: 'email',     example: 'juan@ejemplo.com'  },
+  { label: 'Nombre',           key: 'nombre',             example: 'Juan'              },
+  { label: 'Teléfono',         key: 'telefono',           example: '1123456789'        },
+  { label: 'Email',            key: 'email',              example: 'juan@ejemplo.com'  },
+  { label: 'Cant. pedidos',    key: 'cantidad_pedidos',   example: '3'                 },
+  { label: 'Último pedido',    key: 'fecha_ultimo_pedido', example: '15/03/2026'       },
 ];
-const VAR_EXAMPLE = { nombre: 'Juan', telefono: '1123456789', email: 'juan@ejemplo.com' };
+const VAR_EXAMPLE = {
+  nombre: 'Juan', telefono: '1123456789', email: 'juan@ejemplo.com',
+  cantidad_pedidos: '3', fecha_ultimo_pedido: '15/03/2026',
+};
 
 function NewTemplateForm({ onSuccess, onCancel }) {
   const [form, setForm] = useState({

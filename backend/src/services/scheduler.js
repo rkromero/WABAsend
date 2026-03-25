@@ -16,6 +16,7 @@ import { query } from '../db/index.js';
 import { sendTemplateMessage, fetchTemplates, sleep } from './whatsapp.js';
 import { processAutomationQueue } from './automations.js';
 import { processFollowups } from './followup.js';
+import { getContactOrderStats } from './woocommerce.js';
 
 // Previene ejecuciones concurrentes del mismo scheduler
 let isRunning = false;
@@ -25,29 +26,56 @@ let isRunning = false;
  * usando el variable_mapping de la campaña.
  *
  * variable_mapping = { "1": { source: "nombre" }, "2": { source: "fixed", value: "PROMO20" } }
- * Fuentes disponibles: "nombre", "telefono", "email", "fixed"
+ * Fuentes disponibles: "nombre", "telefono", "email", "fixed", "cantidad_pedidos", "fecha_ultimo_pedido"
  * Fallback si no hay mapping: [nombre] para mantener compatibilidad con plantillas legacy.
  *
  * @param {Object} variableMapping - Mapping de la campaña
  * @param {Object} log             - Fila de waba_message_logs con nombre, telefono, email
- * @returns {string[]} Array de valores en orden numérico de variable
+ * @param {Map}    wooCache        - Cache de stats WooCommerce por teléfono (compartido por campaña)
+ * @returns {Promise<string[]>} Array de valores en orden numérico de variable
  */
-function buildParameterValues(variableMapping, log) {
+async function buildParameterValues(variableMapping, log, wooCache) {
   const keys = Object.keys(variableMapping || {});
   if (keys.length === 0) {
     // Legacy: plantilla con {{1}} pero sin mapping configurado → usar nombre
     return [log.nombre || 'Cliente'];
   }
-  return keys
-    .sort((a, b) => parseInt(a) - parseInt(b))
-    .map((key) => {
-      const m = variableMapping[key];
-      if (m.source === 'nombre')   return log.nombre   || 'Cliente';
-      if (m.source === 'telefono') return log.telefono || '';
-      if (m.source === 'email')    return log.email    || '';
-      if (m.source === 'fixed')    return m.value      || '';
-      return '';
-    });
+
+  const values = await Promise.all(
+    keys
+      .sort((a, b) => parseInt(a) - parseInt(b))
+      .map(async (key) => {
+        const m = variableMapping[key];
+        if (m.source === 'nombre')   return log.nombre   || 'Cliente';
+        if (m.source === 'telefono') return log.telefono || '';
+        if (m.source === 'email')    return log.email    || '';
+        if (m.source === 'fixed')    return m.value      || '';
+
+        // Fuentes WooCommerce — se resuelven con cache para no hacer N llamadas por campaña
+        if (m.source === 'cantidad_pedidos' || m.source === 'fecha_ultimo_pedido') {
+          const cacheKey = log.telefono || log.email;
+          let stats = wooCache.get(cacheKey);
+          if (!stats) {
+            stats = await getContactOrderStats(log.email || null, log.telefono || null);
+            wooCache.set(cacheKey, stats);
+          }
+
+          if (m.source === 'cantidad_pedidos') {
+            return String(stats.cantidadPedidos);
+          }
+          if (m.source === 'fecha_ultimo_pedido') {
+            if (!stats.fechaUltimoPedido) return 'sin pedidos';
+            return stats.fechaUltimoPedido.toLocaleDateString('es-AR', {
+              day: '2-digit', month: '2-digit', year: 'numeric',
+            });
+          }
+        }
+
+        return '';
+      })
+  );
+
+  return values;
 }
 
 /**
@@ -114,12 +142,16 @@ async function executeCampaign(campaign) {
   let sentCount = 0;
   let failedCount = 0;
 
+  // Cache de stats WooCommerce por teléfono para evitar N llamadas a la API.
+  // Se crea por ejecución de campaña y se descarta al terminar.
+  const wooStatsCache = new Map();
+
   for (const log of logs) {
     try {
       // Construir parámetros de variables según el mapping de la campaña.
       // Si no tiene variables, pasar array vacío para que Meta no reciba components.
       const parameterValues = hasVariables
-        ? buildParameterValues(campaign.variable_mapping || {}, log)
+        ? await buildParameterValues(campaign.variable_mapping || {}, log, wooStatsCache)
         : [];
 
       const { messageId } = await sendTemplateMessage(

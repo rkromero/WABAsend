@@ -654,6 +654,62 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
 }
 
 /**
+ * Devuelve estadísticas de pedidos WooCommerce para un contacto.
+ * Busca primero por email (más confiable); si no hay resultados, por teléfono.
+ * Los pedidos considerados: completed, processing, on-hold.
+ *
+ * @param {string|null} email    - Email del contacto
+ * @param {string|null} telefono - Teléfono del contacto (se normaliza a últimos 10 dígitos)
+ * @returns {Promise<{cantidadPedidos: number, fechaUltimoPedido: Date|null}>}
+ */
+export async function getContactOrderStats(email, telefono) {
+  try {
+    const client = getWooClient();
+    let orders = [];
+
+    // Buscar por email (parámetro nativo de WooCommerce, más preciso)
+    if (email) {
+      const res = await client.get('/orders', {
+        params: {
+          billing_email: email,
+          per_page: 100,
+          orderby: 'date',
+          order: 'desc',
+          status: 'completed,processing,on-hold',
+        },
+      });
+      orders = res.data || [];
+    }
+
+    // Si no hay resultados por email, buscar por teléfono (búsqueda general)
+    if (orders.length === 0 && telefono) {
+      const phoneClean = String(telefono).replace(/\D/g, '').slice(-10);
+      const res = await client.get('/orders', {
+        params: {
+          search: phoneClean,
+          per_page: 100,
+          orderby: 'date',
+          order: 'desc',
+          status: 'completed,processing,on-hold',
+        },
+      });
+      orders = res.data || [];
+    }
+
+    if (orders.length === 0) {
+      return { cantidadPedidos: 0, fechaUltimoPedido: null };
+    }
+
+    // La API devuelve en orden descendente por fecha → el primero es el más reciente
+    const fechaUltimoPedido = orders[0].date_created ? new Date(orders[0].date_created) : null;
+    return { cantidadPedidos: orders.length, fechaUltimoPedido };
+  } catch (err) {
+    console.warn('[WooCommerce] No se pudieron obtener stats de pedidos:', err.message);
+    return { cantidadPedidos: 0, fechaUltimoPedido: null };
+  }
+}
+
+/**
  * Trae órdenes de WooCommerce dentro de un rango de fechas.
  * Se usa para el tracking de conversiones: comparamos los emails
  * de los destinatarios de una campaña contra los compradores del período.

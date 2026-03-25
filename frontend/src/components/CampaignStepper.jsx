@@ -25,15 +25,23 @@ function Step1({ data, onChange }) {
 // ── Helpers de variables ──────────────────────────────────────────────────────
 
 const SOURCE_OPTIONS = [
-  { value: 'nombre',   label: 'Nombre del contacto' },
-  { value: 'telefono', label: 'Teléfono' },
-  { value: 'email',    label: 'Email' },
-  { value: 'fixed',    label: 'Texto fijo (igual para todos)' },
+  { value: 'nombre',              label: 'Nombre del contacto'                   },
+  { value: 'telefono',            label: 'Teléfono'                              },
+  { value: 'email',               label: 'Email'                                 },
+  { value: 'cantidad_pedidos',    label: 'Cantidad de pedidos (WooCommerce)'     },
+  { value: 'fecha_ultimo_pedido', label: 'Fecha del último pedido (WooCommerce)' },
+  { value: 'fixed',               label: 'Texto fijo (igual para todos)'         },
 ];
 
-const SOURCE_LABELS = { nombre: 'Nombre', telefono: 'Teléfono', email: 'Email' };
+const SOURCE_LABELS = {
+  nombre: 'Nombre', telefono: 'Teléfono', email: 'Email',
+  cantidad_pedidos: 'Cant. pedidos', fecha_ultimo_pedido: 'Último pedido',
+};
 
-const PREVIEW_CONTACT = { nombre: 'Ana García', telefono: '5491134866718', email: 'ana@ejemplo.com' };
+const PREVIEW_CONTACT = {
+  nombre: 'Ana García', telefono: '5491134866718', email: 'ana@ejemplo.com',
+  cantidad_pedidos: '3', fecha_ultimo_pedido: '15/03/2026',
+};
 
 function extractVariables(bodyText) {
   const matches = [...(bodyText || '').matchAll(/\{\{(\d+)\}\}/g)];
@@ -44,11 +52,9 @@ function renderPreview(bodyText, mapping) {
   return (bodyText || '').replace(/\{\{(\d+)\}\}/g, (_, n) => {
     const m = mapping?.[n];
     if (!m) return `{{${n}}}`;
-    if (m.source === 'nombre')   return PREVIEW_CONTACT.nombre;
-    if (m.source === 'telefono') return PREVIEW_CONTACT.telefono;
-    if (m.source === 'email')    return PREVIEW_CONTACT.email;
-    if (m.source === 'fixed')    return m.value || `{{${n}}}`;
-    return `{{${n}}}`;
+    const src = m.source;
+    if (src === 'fixed') return m.value || `{{${n}}}`;
+    return PREVIEW_CONTACT[src] ?? `{{${n}}}`;
   });
 }
 

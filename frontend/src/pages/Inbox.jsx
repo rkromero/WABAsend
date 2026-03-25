@@ -27,6 +27,7 @@ import {
   Film,
   Music,
   Image as ImageIcon,
+  Braces,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format, formatDistanceToNow, parseISO } from 'date-fns';
@@ -295,6 +296,12 @@ export default function Inbox() {
   const [sendingMedia, setSendingMedia]   = useState(false);
   const fileInputRef = useRef(null);
 
+  // ── Panel de variables ────────────────────────────────────────────────────
+  // Permite insertar valores del contacto activo (nombre, teléfono, pedidos) al cursor
+  const [showVarsPanel, setShowVarsPanel]   = useState(false);
+  const [wooStats, setWooStats]             = useState(null);  // { cantidadPedidos, fechaUltimoPedido }
+  const [loadingWooStats, setLoadingWooStats] = useState(false);
+
   const messagesEndRef    = useRef(null);
   const inputRef          = useRef(null);
   // Ref para detectar nuevos mensajes sin re-renders: guarda el total de
@@ -344,6 +351,9 @@ export default function Inbox() {
    */
   function openConversation(convId) {
     setActiveConvId(convId);
+    // Resetear cache de stats WooCommerce al cambiar de conversación
+    setWooStats(null);
+    setShowVarsPanel(false);
 
     // Optimistic update: zerear unread_count para que el badge desaparezca al instante
     setConversations((prev) =>
@@ -444,6 +454,38 @@ export default function Inbox() {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  }
+
+  // ── Variables de contacto ─────────────────────────────────────────────────
+
+  /** Inserta text en la posición del cursor del textarea de respuesta. */
+  function insertAtCursor(text) {
+    const el = inputRef.current;
+    if (!el) { setReplyText((v) => v + text); return; }
+    const start = el.selectionStart;
+    const end   = el.selectionEnd;
+    const next  = replyText.substring(0, start) + text + replyText.substring(end);
+    setReplyText(next);
+    setTimeout(() => {
+      el.focus();
+      const pos = start + text.length;
+      el.setSelectionRange(pos, pos);
+    }, 0);
+  }
+
+  /** Abre el panel de variables y carga los stats WooCommerce si no están en caché. */
+  async function openVarsPanel() {
+    setShowVarsPanel((v) => !v);
+    if (!activePhone || wooStats !== null) return;
+    setLoadingWooStats(true);
+    try {
+      const res = await api.get(`/contacts/${activePhone}/woo-stats`);
+      setWooStats(res.data);
+    } catch {
+      setWooStats({ cantidadPedidos: 0, fechaUltimoPedido: null });
+    } finally {
+      setLoadingWooStats(false);
     }
   }
 
@@ -736,6 +778,74 @@ export default function Inbox() {
                 </div>
               )}
 
+              {/* Panel de variables — inserta valores del contacto activo al cursor */}
+              {showVarsPanel && (
+                <div className="mb-2 bg-base-elevated border border-base-border rounded-xl overflow-hidden">
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-base-border">
+                    <span className="text-xs font-medium text-gray-400 flex items-center gap-1.5">
+                      <Braces size={11} className="text-accent" />
+                      Insertar variable del contacto
+                    </span>
+                    <button onClick={() => setShowVarsPanel(false)} className="text-gray-600 hover:text-gray-400">
+                      <X size={12} />
+                    </button>
+                  </div>
+                  <div className="px-3 py-2.5 flex flex-wrap gap-2">
+                    {/* Variables fijas del contacto — siempre disponibles */}
+                    {[
+                      { label: 'Nombre',    value: activeName },
+                      { label: 'Teléfono',  value: activePhone },
+                    ].map(({ label, value }) => (
+                      <button
+                        key={label}
+                        onClick={() => { insertAtCursor(value); setShowVarsPanel(false); }}
+                        className="text-xs px-2.5 py-1 rounded-full bg-base-surface border border-base-border text-gray-300 hover:text-white hover:border-accent/40 transition-colors flex items-center gap-1.5"
+                      >
+                        <span className="text-gray-500">{label}:</span>
+                        <span className="font-medium truncate max-w-[120px]">{value || '—'}</span>
+                      </button>
+                    ))}
+
+                    {/* Variables WooCommerce — se cargan al abrir el panel */}
+                    {loadingWooStats ? (
+                      <span className="text-[11px] text-gray-600 self-center">Cargando pedidos…</span>
+                    ) : wooStats ? (
+                      <>
+                        <button
+                          onClick={() => { insertAtCursor(String(wooStats.cantidadPedidos)); setShowVarsPanel(false); }}
+                          className="text-xs px-2.5 py-1 rounded-full bg-base-surface border border-base-border text-gray-300 hover:text-white hover:border-accent/40 transition-colors flex items-center gap-1.5"
+                        >
+                          <span className="text-gray-500">Pedidos:</span>
+                          <span className="font-medium">{wooStats.cantidadPedidos}</span>
+                        </button>
+                        {wooStats.fechaUltimoPedido && (
+                          <button
+                            onClick={() => {
+                              const fecha = new Date(wooStats.fechaUltimoPedido).toLocaleDateString('es-AR', {
+                                day: '2-digit', month: '2-digit', year: 'numeric',
+                              });
+                              insertAtCursor(fecha);
+                              setShowVarsPanel(false);
+                            }}
+                            className="text-xs px-2.5 py-1 rounded-full bg-base-surface border border-base-border text-gray-300 hover:text-white hover:border-accent/40 transition-colors flex items-center gap-1.5"
+                          >
+                            <span className="text-gray-500">Último pedido:</span>
+                            <span className="font-medium">
+                              {new Date(wooStats.fechaUltimoPedido).toLocaleDateString('es-AR', {
+                                day: '2-digit', month: '2-digit', year: 'numeric',
+                              })}
+                            </span>
+                          </button>
+                        )}
+                        {wooStats.cantidadPedidos === 0 && (
+                          <span className="text-[11px] text-gray-600 self-center">Sin pedidos en WooCommerce</span>
+                        )}
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              )}
+
               {/* Panel de mensajes rápidos — se muestra sobre el textarea */}
               {showQRPanel && (
                 <div className="mb-2 bg-base-elevated border border-base-border rounded-xl overflow-hidden">
@@ -795,6 +905,19 @@ export default function Inbox() {
                   }`}
                 >
                   <Zap size={15} />
+                </button>
+
+                {/* Botón de variables */}
+                <button
+                  onClick={openVarsPanel}
+                  title="Insertar variable del contacto"
+                  className={`p-2.5 rounded-xl transition-all shrink-0 ${
+                    showVarsPanel
+                      ? 'bg-accent/10 border border-accent/30 text-accent'
+                      : 'bg-base-elevated border border-base-border text-gray-500 hover:text-gray-300 hover:border-gray-500'
+                  }`}
+                >
+                  <Braces size={15} />
                 </button>
 
                 {/* Botón de adjunto */}

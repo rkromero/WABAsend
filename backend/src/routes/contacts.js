@@ -7,6 +7,7 @@
 import { Router } from 'express';
 import { query } from '../db/index.js';
 import { normalizarTelefono } from '../services/automations.js';
+import { getContactOrderStats } from '../services/woocommerce.js';
 
 const router = Router();
 
@@ -374,6 +375,30 @@ router.get('/:telefono/history', async (req, res) => {
     res.json({ success: true, data: result.rows });
   } catch (err) {
     console.error('[Contacts] history error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/contacts/:telefono/woo-stats — estadísticas de pedidos WooCommerce del contacto
+router.get('/:telefono/woo-stats', async (req, res) => {
+  try {
+    const { telefono } = req.params;
+
+    // Buscar email del contacto en nuestra DB (necesario para la búsqueda por email en WooCommerce)
+    const contactResult = await query(
+      'SELECT email FROM waba_contacts WHERE telefono = $1 LIMIT 1',
+      [telefono]
+    );
+    const email = contactResult.rows[0]?.email || null;
+
+    const stats = await getContactOrderStats(email, telefono);
+
+    res.json({
+      cantidadPedidos:   stats.cantidadPedidos,
+      fechaUltimoPedido: stats.fechaUltimoPedido ? stats.fechaUltimoPedido.toISOString() : null,
+    });
+  } catch (err) {
+    console.error('[Contacts] woo-stats error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
