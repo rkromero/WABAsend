@@ -298,6 +298,46 @@ async function processIncomingMedia({ telefono, nombre, waMessageId, msg }) {
   } catch (err) {
     console.error('[Webhook] Error guardando media entrante en DB:', err.message);
   }
+
+  // --- Bot: responder al media si está activo ---
+  // Si hay caption en una imagen, el bot responde al caption como si fuera texto.
+  // Para audio, video y documentos sin texto, envía un acuse de recibo fijo.
+  try {
+    const botActive = await shouldBotRespond(telefono);
+    if (!botActive) return;
+
+    let botResponse;
+
+    if (mediaType === 'image' && caption) {
+      // Imagen con texto: generar respuesta de IA al caption
+      const conversationHistory = await getConversationHistory(telefono);
+      const rawBotResponse = await generateBotResponse(caption, conversationHistory, null);
+      botResponse = await sanitizeBotResponse(rawBotResponse);
+      await saveConversationTurn(telefono, caption, botResponse);
+    } else {
+      // Audio, video, documento, o imagen sin caption: acuse de recibo fijo
+      const acks = {
+        audio:    'Recibí tu mensaje de voz. Por ahora no puedo escucharlo — ¿me escribís tu consulta en texto?',
+        image:    'Recibí tu imagen. ¿En qué te puedo ayudar?',
+        video:    'Recibí tu video. ¿En qué te puedo ayudar?',
+        document: 'Recibí tu documento. ¿En qué te puedo ayudar?',
+      };
+      botResponse = acks[mediaType] || 'Recibí tu mensaje. ¿En qué te puedo ayudar?';
+    }
+
+    const botMessageId = await sendFreeTextMessage(telefono, botResponse);
+    console.log(`[Bot] Acuse de recibo media enviado a ${telefono} — WA ID: ${botMessageId}`);
+
+    if (chatwootConversationId) {
+      try {
+        await sendMessageToConversation(chatwootConversationId, botResponse, 'outgoing');
+      } catch (cwErr) {
+        console.warn('[Bot] No se pudo registrar acuse en Chatwoot:', cwErr.message);
+      }
+    }
+  } catch (botErr) {
+    console.error('[Bot] Error al responder media:', botErr.message);
+  }
 }
 
 /**
