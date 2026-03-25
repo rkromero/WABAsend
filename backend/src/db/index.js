@@ -416,6 +416,19 @@ export async function initSchema() {
     );
   `);
 
+  // 8. Seguimientos de conversación (follow-up antes de cerrar ventana de 24h)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS waba_conversation_followups (
+      id            SERIAL PRIMARY KEY,
+      telefono      VARCHAR(20)  NOT NULL,
+      status        VARCHAR(20)  NOT NULL DEFAULT 'sent',
+      error_message TEXT,
+      sent_at       TIMESTAMP    DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_waba_followups_telefono_sent
+      ON waba_conversation_followups(telefono, sent_at DESC);
+  `);
+
   console.log('[DB] Esquema inicializado correctamente');
 }
 

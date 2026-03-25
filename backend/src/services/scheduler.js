@@ -15,6 +15,7 @@ import cron from 'node-cron';
 import { query } from '../db/index.js';
 import { sendTemplateMessage, fetchTemplates, sleep } from './whatsapp.js';
 import { processAutomationQueue } from './automations.js';
+import { processFollowups } from './followup.js';
 
 // Previene ejecuciones concurrentes del mismo scheduler
 let isRunning = false;
@@ -180,4 +181,14 @@ export function startScheduler() {
       console.error('[Automations Queue] Error no capturado:', err.message);
     });
   });
+
+  // Follow-up de conversaciones: cada hora en punto
+  // Busca conversaciones cuya ventana de 24h está a punto de cerrarse (±30 min)
+  cron.schedule('0 * * * *', () => {
+    processFollowups().catch((err) => {
+      console.error('[Followup] Error no capturado:', err.message);
+    });
+  });
+
+  console.log('[Scheduler] Follow-up de conversaciones activado — cada hora');
 }

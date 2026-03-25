@@ -7,6 +7,7 @@
 import { Router } from 'express';
 import { query } from '../db/index.js';
 import { processAutomationQueue } from '../services/automations.js';
+import { getFollowupConfig, saveFollowupConfig, processFollowups } from '../services/followup.js';
 
 const router = Router();
 
@@ -184,6 +185,62 @@ router.post('/process', async (req, res) => {
   try {
     await processAutomationQueue();
     res.json({ success: true, message: 'Cola procesada' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── Configuración de follow-up de conversaciones ──────────────────────────
+
+// GET /api/automations/followup — leer config + stats recientes
+router.get('/followup', async (req, res) => {
+  try {
+    const [config, stats] = await Promise.all([
+      getFollowupConfig(),
+      query(`
+        SELECT
+          COUNT(*) FILTER (WHERE status = 'sent')   AS sent_total,
+          COUNT(*) FILTER (WHERE status = 'failed') AS failed_total,
+          COUNT(*) FILTER (WHERE status = 'sent' AND sent_at > NOW() - INTERVAL '7 days') AS sent_last_7d
+        FROM waba_conversation_followups
+      `),
+    ]);
+    res.json({ success: true, data: { config, stats: stats.rows[0] } });
+  } catch (err) {
+    console.error('[Followup] GET error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /api/automations/followup — guardar config
+router.put('/followup', async (req, res) => {
+  const { enabled, mensaje, cooldownDias } = req.body;
+
+  if (mensaje !== undefined && typeof mensaje !== 'string') {
+    return res.status(400).json({ success: false, error: 'mensaje debe ser texto' });
+  }
+  if (mensaje !== undefined && mensaje.trim().length === 0) {
+    return res.status(400).json({ success: false, error: 'El mensaje no puede estar vacío' });
+  }
+  if (cooldownDias !== undefined && (isNaN(parseInt(cooldownDias)) || parseInt(cooldownDias) < 1)) {
+    return res.status(400).json({ success: false, error: 'cooldownDias debe ser un número >= 1' });
+  }
+
+  try {
+    await saveFollowupConfig({ enabled, mensaje, cooldownDias });
+    const updated = await getFollowupConfig();
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    console.error('[Followup] PUT error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/automations/followup/process — forzar ciclo de follow-up (testing)
+router.post('/followup/process', async (req, res) => {
+  try {
+    await processFollowups();
+    res.json({ success: true, message: 'Ciclo de follow-up ejecutado' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

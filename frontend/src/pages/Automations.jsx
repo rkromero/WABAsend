@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Zap, Plus, Trash2, ToggleLeft, ToggleRight, RefreshCw,
   Clock, CheckCircle, XCircle, AlertCircle, Copy, Phone, Check, Edit2,
+  MessageCircle, Save,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../lib/api.js';
@@ -287,6 +288,148 @@ function NewAutomationModal({ templates, onSave, onClose }) {
   );
 }
 
+// ── Panel de configuración de follow-up ────────────────────────────────────
+function FollowupPanel() {
+  const [config, setConfig]   = useState({ enabled: false, mensaje: '', cooldownDias: 3 });
+  const [stats, setStats]     = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving]   = useState(false);
+
+  async function fetchFollowup() {
+    try {
+      const res = await api.get('/automations/followup');
+      setConfig(res.data.config);
+      setStats(res.data.stats);
+    } catch (err) {
+      toast.error('Error al cargar configuración de seguimiento');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { fetchFollowup(); }, []);
+
+  async function handleSave() {
+    if (!config.mensaje.trim()) {
+      toast.error('El mensaje no puede estar vacío');
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.put('/automations/followup', config);
+      toast.success('Configuración de seguimiento guardada');
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleToggle() {
+    const next = { ...config, enabled: !config.enabled };
+    setConfig(next);
+    try {
+      await api.put('/automations/followup', { enabled: next.enabled });
+      toast.success(next.enabled ? 'Seguimiento activado' : 'Seguimiento desactivado');
+    } catch (err) {
+      setConfig(config); // revertir
+      toast.error(err.message);
+    }
+  }
+
+  if (loading) return <div className="skeleton h-40 rounded-xl" />;
+
+  return (
+    <div className={`glass-card p-5 border transition-all ${config.enabled ? 'border-accent/30' : 'border-base-border'}`}>
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div className="flex items-center gap-3">
+          <div className={`p-2 rounded-lg ${config.enabled ? 'bg-accent/10' : 'bg-white/5'}`}>
+            <MessageCircle size={16} className={config.enabled ? 'text-accent' : 'text-gray-500'} />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-white">Seguimiento de conversaciones</p>
+            <p className="text-[11px] text-gray-500 mt-0.5">
+              Mensaje automático antes de que cierre la ventana de 24h de WhatsApp
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={handleToggle}
+          title={config.enabled ? 'Desactivar' : 'Activar'}
+          className="p-1.5 rounded-lg hover:bg-white/5 transition-colors shrink-0"
+        >
+          {config.enabled
+            ? <ToggleRight size={22} className="text-accent" />
+            : <ToggleLeft  size={22} className="text-gray-500" />}
+        </button>
+      </div>
+
+      {/* Stats */}
+      {stats && (
+        <div className="flex gap-3 mb-4 flex-wrap">
+          <span className="text-[11px] px-2 py-1 rounded-lg bg-accent/10 text-accent">
+            {stats.sent_last_7d || 0} enviados últimos 7 días
+          </span>
+          <span className="text-[11px] px-2 py-1 rounded-lg bg-green-400/10 text-green-400">
+            {stats.sent_total || 0} enviados en total
+          </span>
+          {parseInt(stats.failed_total) > 0 && (
+            <span className="text-[11px] px-2 py-1 rounded-lg bg-red-400/10 text-red-400">
+              {stats.failed_total} fallidos
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Config fields */}
+      <div className="space-y-3">
+        <div>
+          <label className="form-label">MENSAJE DE SEGUIMIENTO</label>
+          <textarea
+            rows={3}
+            className="input-field resize-none text-sm"
+            placeholder="ej: Hola! Quería saber si pudiste ver los productos que te recomendé…"
+            value={config.mensaje}
+            onChange={(e) => setConfig((c) => ({ ...c, mensaje: e.target.value }))}
+          />
+          <p className="text-[10px] text-gray-600 mt-1">
+            Se envía ~2 horas antes de que expire la ventana de 24h desde el último mensaje del usuario.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="flex-1">
+            <label className="form-label">COOLDOWN ENTRE SEGUIMIENTOS</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={1}
+                max={30}
+                className="input-field w-20 text-center"
+                value={config.cooldownDias}
+                onChange={(e) => setConfig((c) => ({ ...c, cooldownDias: parseInt(e.target.value) || 3 }))}
+              />
+              <span className="text-sm text-gray-400">
+                día{config.cooldownDias !== 1 ? 's' : ''} mínimo entre seguimientos por contacto
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        className="btn-primary mt-4 w-full flex items-center justify-center gap-2"
+      >
+        <Save size={14} />
+        {saving ? 'Guardando...' : 'Guardar configuración'}
+      </button>
+    </div>
+  );
+}
+
 // ── Página principal ───────────────────────────────────────────────────────
 export default function Automations() {
   const [automations, setAutomations] = useState([]);
@@ -388,6 +531,9 @@ export default function Automations() {
           </div>
         </div>
       )}
+
+      {/* Follow-up de conversaciones */}
+      <FollowupPanel />
 
       {/* Guía de configuración WooCommerce */}
       <div className="glass-card p-4 border border-blue-500/20 bg-blue-500/5">
