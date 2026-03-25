@@ -146,6 +146,16 @@ export async function processWooEvent(evento, data) {
  * Las entradas 'invalid_phone' se ignoran hasta que el usuario las corrija.
  */
 export async function processAutomationQueue() {
+  // Excluir opt-outs de la cola. Se marcan como 'failed' con motivo explicativo.
+  await query(
+    `UPDATE waba_automation_queue
+     SET status = 'failed',
+         error_message = 'Opt-out: contacto solicitó no recibir mensajes'
+     WHERE status = 'pending'
+       AND scheduled_for <= NOW()
+       AND EXISTS (SELECT 1 FROM waba_optouts o WHERE o.telefono = waba_automation_queue.telefono)`
+  );
+
   const pendingResult = await query(
     `SELECT q.*, a.template_name, a.template_language, a.nombre AS automation_nombre
      FROM waba_automation_queue q

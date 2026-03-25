@@ -487,6 +487,20 @@ export async function initSchema() {
     console.warn('[DB] waba_followup_conversions migration warning:', err.message.split('\n')[0]);
   }
 
+  // 11. Opt-outs — contactos que solicitaron no recibir más mensajes.
+  //     Se excluyen de campañas, follow-ups y automatizaciones.
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS waba_optouts (
+        telefono    VARCHAR(20)  PRIMARY KEY,
+        motivo      TEXT,
+        created_at  TIMESTAMP DEFAULT NOW()
+      )
+    `);
+  } catch (err) {
+    console.warn('[DB] waba_optouts migration warning:', err.message.split('\n')[0]);
+  }
+
   console.log('[DB] Esquema inicializado correctamente');
 }
 

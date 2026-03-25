@@ -97,6 +97,22 @@ router.post('/', async (req, res) => {
   }
 });
 
+// Palabras clave que indican que el usuario quiere darse de baja.
+// Case-insensitive, se evalúan contra el texto completo del mensaje.
+const OPTOUT_KEYWORDS = [
+  'stop', 'baja', 'darme de baja', 'no quiero', 'no me mandes',
+  'no me escribas', 'cancelar', 'desuscribir', 'unsuscribe', 'no gracias',
+];
+
+/**
+ * Devuelve true si el texto contiene alguna palabra/frase de opt-out.
+ * @param {string} text
+ */
+function isOptOutMessage(text) {
+  const lower = text.toLowerCase().trim();
+  return OPTOUT_KEYWORDS.some((kw) => lower === kw || lower.startsWith(kw + ' ') || lower.endsWith(' ' + kw) || lower.includes(' ' + kw + ' '));
+}
+
 /**
  * Procesa un mensaje de texto entrante de WhatsApp.
  * Guarda en DB local y sincroniza con Chatwoot.
@@ -133,6 +149,24 @@ async function processIncomingMessage({ telefono, nombre, messageText, waMessage
     console.log(`[Webhook] Mensaje entrante guardado — de: ${telefono}`);
   } catch (err) {
     console.error('[Webhook] Error guardando mensaje entrante en DB:', err.message);
+  }
+
+  // --- Opt-out: detectar si el usuario quiere darse de baja ----------------
+  // Si el mensaje contiene una palabra clave de baja, registramos el opt-out
+  // y NO procesamos con el bot. El mensaje ya está guardado en DB para trazabilidad.
+  if (isOptOutMessage(messageText)) {
+    try {
+      await query(
+        `INSERT INTO waba_optouts (telefono, motivo)
+         VALUES ($1, $2)
+         ON CONFLICT (telefono) DO UPDATE SET motivo = EXCLUDED.motivo, created_at = NOW()`,
+        [telefono, `Auto: "${messageText.substring(0, 200)}"`]
+      );
+      console.log(`[Webhook] Opt-out automático registrado para ${telefono}`);
+    } catch (optErr) {
+      console.warn('[Webhook] Error al registrar opt-out:', optErr.message);
+    }
+    return; // No pasar por el bot
   }
 
   // --- Bot de IA: responder automáticamente si está habilitado ---

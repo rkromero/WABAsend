@@ -28,6 +28,7 @@ import productsRouter from './routes/products.js';
 import automationsRouter from './routes/automations.js';
 import wooWebhookRouter from './routes/wooWebhook.js';
 import knowledgeRouter from './routes/knowledge.js';
+import optoutsRouter from './routes/optouts.js';
 
 dotenv.config();
 
@@ -90,6 +91,7 @@ app.use('/api/products', productsRouter);
 app.use('/api/automations', automationsRouter);
 app.use('/api/woo-webhook', wooWebhookRouter);
 app.use('/api/knowledge', knowledgeRouter);
+app.use('/api/optouts', optoutsRouter);
 app.use('/webhook', webhookRouter);
 
 // --- Manejo global de errores ---

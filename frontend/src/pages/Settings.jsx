@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings as SettingsIcon, Save, Eye, EyeOff, CheckCircle, Copy } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Eye, EyeOff, CheckCircle, Copy, Ban, RotateCcw } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../lib/api.js';
 
@@ -41,6 +41,12 @@ export default function Settings() {
   const [saving, setSaving]   = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // ── Opt-outs ──────────────────────────────────────────────────────────────
+  const [optouts, setOptouts]           = useState([]);
+  const [loadingOptouts, setLoadingOptouts] = useState(true);
+  const [newOptout, setNewOptout]       = useState('');
+  const [savingOptout, setSavingOptout] = useState(false);
+
   useEffect(() => {
     api.get('/config')
       .then((r) => {
@@ -51,7 +57,39 @@ export default function Settings() {
         toast.error(err.message);
         setLoading(false);
       });
+
+    api.get('/optouts')
+      .then((r) => setOptouts(r.data?.data || []))
+      .catch(() => {})
+      .finally(() => setLoadingOptouts(false));
   }, []);
+
+  async function handleAddOptout() {
+    const tel = newOptout.trim();
+    if (!tel) return;
+    setSavingOptout(true);
+    try {
+      await api.post('/optouts', { telefono: tel, motivo: 'manual' });
+      setOptouts((prev) => [{ telefono: tel, motivo: 'manual', created_at: new Date().toISOString() }, ...prev]);
+      setNewOptout('');
+      toast.success('Opt-out registrado');
+    } catch (err) {
+      toast.error(err.message || 'Error al registrar');
+    } finally {
+      setSavingOptout(false);
+    }
+  }
+
+  async function handleRemoveOptout(telefono) {
+    if (!window.confirm(`¿Reactivar a ${telefono}?`)) return;
+    try {
+      await api.delete(`/optouts/${telefono}`);
+      setOptouts((prev) => prev.filter((o) => o.telefono !== telefono));
+      toast.success('Contacto reactivado');
+    } catch (err) {
+      toast.error(err.message || 'Error al reactivar');
+    }
+  }
 
   function update(key, value) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -199,6 +237,80 @@ export default function Settings() {
             <li>Suscribite al evento <code>messages</code></li>
           </ol>
         </div>
+      </div>
+
+      {/* ── Opt-outs ──────────────────────────────────────────────────────── */}
+      <div className="glass-card p-6 space-y-4">
+        <div className="flex items-center gap-2">
+          <Ban size={15} className="text-red-400" />
+          <h2 className="text-sm font-medium text-white">Bajas (opt-outs)</h2>
+          {optouts.length > 0 && (
+            <span className="ml-auto text-[10px] bg-red-500/10 border border-red-500/20 text-red-400 rounded-full px-2 py-0.5">
+              {optouts.length} {optouts.length === 1 ? 'contacto' : 'contactos'}
+            </span>
+          )}
+        </div>
+
+        <p className="text-xs text-gray-500">
+          Estos números están excluidos de campañas, follow-ups y automatizaciones.
+          Se agregan automáticamente cuando alguien escribe <span className="text-gray-300">STOP</span>, <span className="text-gray-300">baja</span> u otras palabras de baja.
+        </p>
+
+        {/* Agregar manualmente */}
+        <div className="flex gap-2">
+          <input
+            type="text"
+            placeholder="Ej: 5491134866718"
+            value={newOptout}
+            onChange={(e) => setNewOptout(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleAddOptout()}
+            className="input-field flex-1"
+          />
+          <button
+            onClick={handleAddOptout}
+            disabled={savingOptout || !newOptout.trim()}
+            className="btn-secondary shrink-0 disabled:opacity-40"
+          >
+            <Ban size={13} />
+            Agregar
+          </button>
+        </div>
+
+        {/* Lista */}
+        {loadingOptouts ? (
+          <div className="space-y-2">
+            {[1, 2].map((i) => <div key={i} className="skeleton h-10 rounded-lg" />)}
+          </div>
+        ) : optouts.length === 0 ? (
+          <p className="text-xs text-gray-600 text-center py-4">
+            No hay contactos dados de baja.
+          </p>
+        ) : (
+          <div className="space-y-1.5 max-h-64 overflow-y-auto">
+            {optouts.map((o) => (
+              <div
+                key={o.telefono}
+                className="flex items-center gap-3 px-3 py-2 bg-base-elevated border border-base-border rounded-lg"
+              >
+                <Ban size={12} className="text-red-400 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-200 font-mono">{o.telefono}</p>
+                  <p className="text-[10px] text-gray-600 truncate">{o.motivo || '—'}</p>
+                </div>
+                <span className="text-[10px] text-gray-600 shrink-0">
+                  {new Date(o.created_at).toLocaleDateString('es-AR')}
+                </span>
+                <button
+                  onClick={() => handleRemoveOptout(o.telefono)}
+                  title="Reactivar contacto"
+                  className="p-1 text-gray-600 hover:text-accent transition-colors shrink-0"
+                >
+                  <RotateCcw size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

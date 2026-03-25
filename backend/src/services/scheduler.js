@@ -35,14 +35,31 @@ async function executeCampaign(campaign) {
     [campaign.id]
   );
 
-  // Obtener todos los mensajes pendientes de esta campaña
+  // Obtener mensajes pendientes de esta campaña, excluyendo opt-outs.
+  // Un opt-out se marca como 'failed' con motivo explicativo para trazabilidad.
   const logsResult = await query(
-    "SELECT * FROM waba_message_logs WHERE campaign_id = $1 AND status = 'pending'",
+    `SELECT l.*
+     FROM waba_message_logs l
+     WHERE l.campaign_id = $1
+       AND l.status = 'pending'
+       AND NOT EXISTS (
+         SELECT 1 FROM waba_optouts o WHERE o.telefono = l.telefono
+       )`,
+    [campaign.id]
+  );
+
+  // Marcar como 'skipped' los mensajes de contactos en opt-out
+  await query(
+    `UPDATE waba_message_logs
+     SET status = 'failed', error_message = 'Opt-out: contacto solicitó no recibir mensajes', updated_at = NOW()
+     WHERE campaign_id = $1
+       AND status = 'pending'
+       AND EXISTS (SELECT 1 FROM waba_optouts o WHERE o.telefono = waba_message_logs.telefono)`,
     [campaign.id]
   );
 
   const logs = logsResult.rows;
-  console.log(`[Scheduler] Campaña #${campaign.id}: ${logs.length} mensajes pendientes`);
+  console.log(`[Scheduler] Campaña #${campaign.id}: ${logs.length} mensajes pendientes (opt-outs excluidos)`);
 
   // Detectar si la plantilla tiene variables ({{1}}) para no mandar parameters de más.
   // Meta devuelve error #132000 si se envían parameters a una plantilla sin variables.

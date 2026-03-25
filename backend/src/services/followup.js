@@ -111,6 +111,11 @@ export async function processFollowups() {
            SELECT 1 FROM waba_conversation_overrides o
            WHERE o.telefono = m.telefono AND o.bot_paused = true
          )
+         -- Excluir opt-outs
+         AND NOT EXISTS (
+           SELECT 1 FROM waba_optouts op
+           WHERE op.telefono = m.telefono
+         )
        GROUP BY m.telefono
        HAVING MAX(m.created_at) BETWEEN NOW() - ($2 || ' hours')::INTERVAL
                                     AND NOW() - ($3 || ' hours')::INTERVAL`,
