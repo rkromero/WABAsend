@@ -363,8 +363,8 @@ export default function Inbox() {
   const fetchConversations = useCallback(async () => {
     try {
       const res = await api.get('/inbox/conversations?page=1');
-      // Chatwoot devuelve { data: { payload: [...] } } o similar
-      const payload = res.data?.payload || res.data || [];
+      // Backend envuelve la respuesta de Chatwoot: { success, data: { payload: [...] } }
+      const payload = res.data?.data?.payload || res.data?.payload || [];
       const convs = Array.isArray(payload) ? payload : [];
 
       // Calcular el total de mensajes no leídos en esta carga
