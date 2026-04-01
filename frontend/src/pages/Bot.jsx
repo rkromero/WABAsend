@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Bot as BotIcon, Save, Clock, Power, CheckCircle, Timer } from 'lucide-react';
+import { Bot as BotIcon, Save, Clock, Power, CheckCircle, Timer, Languages } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../lib/api.js';
 
@@ -11,6 +11,7 @@ export default function Bot() {
     BOT_SCHEDULE_START:    '08:00',
     BOT_SCHEDULE_END:      '20:00',
     BOT_DEBOUNCE_SECONDS:  3,
+    BOT_SYNONYMS:          '',
   });
   const [loading, setLoading]  = useState(true);
   const [saving, setSaving]    = useState(false);
@@ -140,7 +141,33 @@ export default function Bot() {
             </div>
           </div>
 
-          {/* Sección 3: Espera para mensajes múltiples */}
+          {/* Sección 3: Sinónimos de productos */}
+          <div className="glass-card p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <Languages size={16} className="text-accent" />
+              <h2 className="text-sm font-medium text-white">Sinónimos de búsqueda</h2>
+            </div>
+
+            <p className="text-xs text-gray-500">
+              Cuando un cliente usa una palabra diferente para referirse a un producto, el bot puede buscar
+              automáticamente las alternativas. Escribí una línea por grupo, con los términos separados por comas.
+            </p>
+
+            <div>
+              <label className="form-label">Grupos de sinónimos</label>
+              <textarea
+                className="input-field min-h-[120px] resize-y font-mono text-xs"
+                placeholder={`campera, chaqueta, jacket, abrigo\nremera, camiseta, polera\npantalón, pantalon, pant\nzapatillas, sneakers, tenis`}
+                value={form.BOT_SYNONYMS}
+                onChange={(e) => update('BOT_SYNONYMS', e.target.value)}
+              />
+              <p className="text-xs text-gray-600 mt-1.5">
+                Cada línea es un grupo. Si el cliente escribe cualquiera de los términos, el bot busca todos los equivalentes en el catálogo.
+              </p>
+            </div>
+          </div>
+
+          {/* Sección 4: Espera para mensajes múltiples */}
           <div className="glass-card p-6 space-y-4">
             <div className="flex items-center gap-2">
               <Timer size={16} className="text-accent" />

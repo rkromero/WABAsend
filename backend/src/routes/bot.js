@@ -19,6 +19,7 @@ const BOT_KEYS = [
   'BOT_SCHEDULE_START',
   'BOT_SCHEDULE_END',
   'BOT_DEBOUNCE_SECONDS',
+  'BOT_SYNONYMS',
 ];
 
 // GET /api/bot — devuelve la configuración actual del bot desde la tabla config
@@ -42,6 +43,7 @@ router.get('/', async (req, res) => {
       BOT_SCHEDULE_START:    config.BOT_SCHEDULE_START || '08:00',
       BOT_SCHEDULE_END:      config.BOT_SCHEDULE_END || '20:00',
       BOT_DEBOUNCE_SECONDS:  parseInt(config.BOT_DEBOUNCE_SECONDS ?? '3', 10),
+      BOT_SYNONYMS:          config.BOT_SYNONYMS || '',
     };
 
     res.json({ success: true, data });

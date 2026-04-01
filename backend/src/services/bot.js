@@ -62,7 +62,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 export async function getBotConfig() {
   const result = await query(
     `SELECT key, value FROM config
-     WHERE key IN ('BOT_ENABLED', 'BOT_PROMPT', 'BOT_SCHEDULE_ENABLED', 'BOT_SCHEDULE_START', 'BOT_SCHEDULE_END')`
+     WHERE key IN ('BOT_ENABLED', 'BOT_PROMPT', 'BOT_SCHEDULE_ENABLED', 'BOT_SCHEDULE_START', 'BOT_SCHEDULE_END', 'BOT_SYNONYMS')`
   );
 
   const raw = {};
@@ -76,7 +76,61 @@ export async function getBotConfig() {
     scheduleEnabled: raw.BOT_SCHEDULE_ENABLED === 'true',
     scheduleStart: raw.BOT_SCHEDULE_START || '08:00',
     scheduleEnd: raw.BOT_SCHEDULE_END || '20:00',
+    synonymsRaw: raw.BOT_SYNONYMS || '',
   };
+}
+
+/**
+ * Expande un mensaje de búsqueda usando los grupos de sinónimos configurados.
+ * Si el mensaje contiene un término que pertenece a un grupo, agrega sus equivalentes
+ * al final de la query para que la búsqueda los considere también.
+ *
+ * Formato de synonymsRaw: cada línea es un grupo, términos separados por coma.
+ * Ejemplo:
+ *   campera, chaqueta, jacket, abrigo
+ *   remera, camiseta, polera
+ *
+ * @param {string} mensaje      - Mensaje original del usuario
+ * @param {string} synonymsRaw  - Valor de BOT_SYNONYMS de la config
+ * @returns {string} Mensaje expandido con sinónimos adicionales
+ */
+function expandWithSynonyms(mensaje, synonymsRaw) {
+  if (!synonymsRaw || !synonymsRaw.trim()) return mensaje;
+
+  // Parsear los grupos: cada línea es un grupo, términos separados por coma
+  const groups = synonymsRaw
+    .split('\n')
+    .map((line) => line.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean))
+    .filter((g) => g.length > 1);
+
+  if (groups.length === 0) return mensaje;
+
+  const mensajeLower = mensaje.toLowerCase();
+  const additions = [];
+
+  for (const group of groups) {
+    // Verificar si algún término del grupo aparece en el mensaje
+    const matchedTerm = group.find((term) => {
+      // Buscar como palabra completa para evitar falsos positivos
+      const regex = new RegExp(`\\b${term}\\b`, 'i');
+      return regex.test(mensajeLower);
+    });
+
+    if (matchedTerm) {
+      // Agregar los otros términos del grupo que no estén ya en el mensaje
+      for (const synonym of group) {
+        if (synonym !== matchedTerm && !new RegExp(`\\b${synonym}\\b`, 'i').test(mensajeLower)) {
+          additions.push(synonym);
+        }
+      }
+    }
+  }
+
+  if (additions.length === 0) return mensaje;
+
+  const expanded = `${mensaje} ${additions.join(' ')}`;
+  console.log(`[Bot] Sinónimos aplicados: "${mensaje.substring(0, 60)}" → "${expanded.substring(0, 80)}"`);
+  return expanded;
 }
 
 /**
@@ -217,11 +271,15 @@ export async function generateBotResponse(userMessage, conversationHistory = [],
     }
   }
 
+  // Expandir la query con sinónimos configurados antes de buscar productos.
+  // Ej: "campera greek" → "campera greek chaqueta jacket" si "campera, chaqueta, jacket" es un grupo.
+  const expandedSearchQuery = expandWithSynonyms(searchQuery, config.synonymsRaw);
+
   // Buscar productos relevantes en el catálogo según el mensaje del usuario.
   // Siempre se busca en waba_products (BD local), independientemente de si WooCommerce está conectado.
   let productosContext = '';
   try {
-    const products = await searchRelevantProducts(searchQuery, 6);
+    const products = await searchRelevantProducts(expandedSearchQuery, 6);
     productosContext = formatProductsForPrompt(products);
     if (products.length > 0) {
       console.log(`[Bot] ${products.length} producto(s) relevante(s) inyectados en el prompt`);
