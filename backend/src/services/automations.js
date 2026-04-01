@@ -14,10 +14,31 @@
 
 import { query } from '../db/index.js';
 import { sendTemplateMessage, fetchTemplates, sleep } from './whatsapp.js';
+import { getOrCreateContact, getOrCreateConversation, sendMessageToConversation } from './chatwoot.js';
 
 // Cache de templates para no llamar a Meta en cada mensaje de la cola
 let _templateCache = null;
 let _templateCacheAt = 0;
+
+/**
+ * Devuelve el texto del BODY de una plantilla dado su nombre e idioma.
+ * Usa el mismo cache de 10 minutos que getTemplateHasVariables.
+ *
+ * @returns {string} Texto de la plantilla o cadena vacía si no se encuentra
+ */
+async function getTemplateBodyText(templateName, templateLanguage) {
+  const now = Date.now();
+  if (!_templateCache || now - _templateCacheAt > 10 * 60 * 1000) {
+    try {
+      _templateCache = await fetchTemplates();
+      _templateCacheAt = now;
+    } catch {
+      return '';
+    }
+  }
+  const tpl = _templateCache?.find((t) => t.name === templateName && t.language === templateLanguage);
+  return tpl?.components?.find((c) => c.type === 'BODY')?.text || '';
+}
 
 async function getTemplateHasVariables(templateName, templateLanguage) {
   const now = Date.now();
@@ -210,6 +231,25 @@ export async function processAutomationQueue() {
          WHERE id = $2`,
         [messageId, item.id]
       );
+
+      // Registrar el mensaje saliente en Chatwoot para que sea visible en la bandeja.
+      // Se hace en un try/catch separado: si Chatwoot falla, no interrumpimos la cola.
+      try {
+        const bodyText = await getTemplateBodyText(item.template_name, item.template_language);
+        const renderedText = bodyText
+          ? (parameterValues.length > 0
+              ? parameterValues.reduce(
+                  (text, value, index) => text.replace(new RegExp(`\\{\\{${index + 1}\\}\\}`, 'g'), value),
+                  bodyText
+                )
+              : bodyText)
+          : `[Automatización: ${item.automation_nombre}] Plantilla: ${item.template_name}`;
+        const contact = await getOrCreateContact(item.telefono, item.nombre_cliente || item.telefono);
+        const conversation = await getOrCreateConversation(contact.id);
+        await sendMessageToConversation(conversation.id, renderedText, 'outgoing');
+      } catch (chatwootErr) {
+        console.warn(`[Automations] No se pudo registrar en Chatwoot para ${item.telefono}: ${chatwootErr.message}`);
+      }
 
       console.log(`[Automations] ✓ Enviado "${item.automation_nombre}" → ${item.telefono}`);
     } catch (err) {

@@ -17,9 +17,27 @@ import { sendTemplateMessage, fetchTemplates, sleep } from './whatsapp.js';
 import { processAutomationQueue } from './automations.js';
 import { processFollowups } from './followup.js';
 import { getContactOrderStats } from './woocommerce.js';
+import { getOrCreateContact, getOrCreateConversation, sendMessageToConversation } from './chatwoot.js';
 
 // Previene ejecuciones concurrentes del mismo scheduler
 let isRunning = false;
+
+/**
+ * Reemplaza los placeholders {{1}}, {{2}}, ... en el texto de una plantilla
+ * con los valores reales enviados, para mostrar el mensaje renderizado en Chatwoot.
+ *
+ * @param {string}   bodyText        - Texto de la plantilla con {{N}}
+ * @param {string[]} parameterValues - Valores de las variables en orden
+ * @returns {string} Texto con variables sustituidas
+ */
+function renderTemplateText(bodyText, parameterValues) {
+  if (!bodyText) return '';
+  if (!parameterValues || parameterValues.length === 0) return bodyText;
+  return parameterValues.reduce(
+    (text, value, index) => text.replace(new RegExp(`\\{\\{${index + 1}\\}\\}`, 'g'), value),
+    bodyText
+  );
+}
 
 /**
  * Construye el array de valores de variables para un contacto dado,
@@ -168,6 +186,21 @@ async function executeCampaign(campaign) {
          WHERE id = $2`,
         [messageId, log.id]
       );
+
+      // Registrar el mensaje saliente en Chatwoot para que sea visible en la bandeja.
+      // Se hace en un try/catch separado: si Chatwoot falla, no interrumpimos el envío masivo.
+      try {
+        const renderedText = renderTemplateText(templateBodyText, parameterValues);
+        const contact = await getOrCreateContact(log.telefono, log.nombre || log.telefono);
+        const conversation = await getOrCreateConversation(contact.id);
+        await sendMessageToConversation(
+          conversation.id,
+          renderedText || `[Campaña: ${campaign.nombre}] Plantilla: ${campaign.template_name}`,
+          'outgoing'
+        );
+      } catch (chatwootErr) {
+        console.warn(`[Scheduler] No se pudo registrar en Chatwoot para ${log.telefono}: ${chatwootErr.message}`);
+      }
 
       // Guardar ventana de contexto de campaña para que el bot pueda responder
       // en el contexto correcto si la persona responde dentro de las 48h.
