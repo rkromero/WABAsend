@@ -359,8 +359,9 @@ export default function Inbox() {
   // ── Borrar conversación ───────────────────────────────────────────────────
   const [deleteConfirm, setDeleteConfirm] = useState(null); // { id, name } | null
   const [deleting, setDeleting]           = useState(false);
-  // IDs borrados localmente: el polling los filtra para que no reaparezcan
-  const deletedConvIds = useRef(new Set());
+  // Conversaciones borradas localmente: Map<id, last_activity_at al momento del borrado>
+  // El polling las filtra SOLO si no tienen actividad nueva posterior al borrado.
+  const deletedConvIds = useRef(new Map());
 
   const messagesEndRef    = useRef(null);
   const inputRef          = useRef(null);
@@ -382,8 +383,16 @@ export default function Inbox() {
       const res = await api.get('/inbox/conversations?page=1');
       // Backend envuelve la respuesta de Chatwoot: { success, data: { payload: [...] } }
       const payload = res.data?.data?.payload || res.data?.payload || [];
-      const convs = (Array.isArray(payload) ? payload : [])
-        .filter((c) => !deletedConvIds.current.has(c.id));
+      const convs = (Array.isArray(payload) ? payload : []).filter((c) => {
+        const deletedAt = deletedConvIds.current.get(c.id);
+        if (deletedAt === undefined) return true; // no fue borrada
+        // Si llegó actividad nueva después del borrado → reabrió con mensaje nuevo → mostrar
+        if ((c.last_activity_at || 0) > deletedAt) {
+          deletedConvIds.current.delete(c.id); // ya no está "borrada"
+          return true;
+        }
+        return false; // misma actividad → ocultar
+      });
 
       // Calcular el total de mensajes no leídos en esta carga
       const unreadTotal = convs.reduce((sum, c) => sum + (parseInt(c.unread_count) || 0), 0);
@@ -481,8 +490,10 @@ export default function Inbox() {
     setDeleting(true);
     try {
       await api.delete(`/inbox/conversations/${deleteConfirm.id}`);
-      // Registrar como borrada para que el polling no la restaure
-      deletedConvIds.current.add(deleteConfirm.id);
+      // Guardar el timestamp de actividad al momento del borrado.
+      // El polling solo la oculta si no llegó actividad nueva posterior.
+      const convData = conversations.find((c) => c.id === deleteConfirm.id);
+      deletedConvIds.current.set(deleteConfirm.id, convData?.last_activity_at ?? Date.now() / 1000);
       // Optimistic: quitar de la lista local de inmediato
       setConversations((prev) => prev.filter((c) => c.id !== deleteConfirm.id));
       if (activeConvId === deleteConfirm.id) {
