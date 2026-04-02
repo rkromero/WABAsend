@@ -194,7 +194,7 @@ async function fetchVariations(productId) {
  * @param {string} categorias
  * @returns {'parte_arriba'|'pantalon'|'vestido_falda'|'otro'}
  */
-function detectGarmentCategory(nombre, categorias) {
+export function detectGarmentCategory(nombre, categorias) {
   const text = `${nombre} ${categorias}`.toLowerCase();
   if (/sweater|remera|blusa|camisa|top\b|camiseta|musculosa|body\b|cardigan|chaleco|túnica|tunica/.test(text)) {
     return 'parte_arriba';

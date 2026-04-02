@@ -16,7 +16,8 @@
 
 import OpenAI from 'openai';
 import { query } from '../db/index.js';
-import { searchRelevantProducts } from './woocommerce.js';
+import { searchRelevantProducts, detectGarmentCategory } from './woocommerce.js';
+import { expandVariantes, getSizeRulesBlock } from './sizeNormalizer.js';
 
 /**
  * Carga todos los artículos activos de la base de conocimiento y los formatea
@@ -217,9 +218,15 @@ function formatProductsForPrompt(products) {
     const precio = p.precio_oferta
       ? `$${p.precio_oferta} (antes $${p.precio})`
       : `$${p.precio}`;
+
+    // Detectar categoría de prenda para normalizar los talles correctamente
+    // (superiores usan S/M/L/XL, inferiores usan 36/38/40/42)
+    const garmentCategory = detectGarmentCategory(p.nombre || '', p.categorias || '');
+    const variantesNormalizadas = expandVariantes(p.variantes, garmentCategory);
+
     // Para productos con talles/colores, mostrar los disponibles en lugar del número de stock
     const disponibilidad = p.variantes
-      ? `Talles disponibles: ${p.variantes}`
+      ? `Talles disponibles: ${variantesNormalizadas}`
       : `Stock: ${p.stock}`;
     const desc = p.descripcion_vision || p.nombre;
     const link = p.permalink ? ` | Link: ${p.permalink}` : '';
@@ -303,8 +310,12 @@ export async function generateBotResponse(userMessage, conversationHistory = [],
     ? `\n\nCONTEXTO DE CAMPAÑA:\nEsta persona recibió recientemente la campaña "${campaignContext.campaignNombre}" con el siguiente mensaje:\n"${campaignContext.templateBody}"\n\nRespondé teniendo en cuenta ese contexto. Si era una campaña de reactivación, recibimiento o novedad, respondé con entusiasmo y continuá la conversación en esa línea antes de ofrecer productos.`
     : '';
 
-  // System prompt = instrucciones del usuario + contexto de campaña + conocimiento + productos disponibles + regla anti-alucinación
-  const systemPrompt = config.prompt + campaignBlock + knowledgeContext + productosContext + antiHallucinationRule;
+  // Reglas de equivalencia de talles: enseña al modelo que "2" = "M" (superiores)
+  // y "2" = "38" (inferiores), y que el talle único es universal en prendas superiores.
+  const sizeRules = getSizeRulesBlock();
+
+  // System prompt = instrucciones del usuario + campaña + conocimiento + reglas de talles + productos + regla anti-alucinación
+  const systemPrompt = config.prompt + campaignBlock + knowledgeContext + sizeRules + productosContext + antiHallucinationRule;
 
   const response = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
