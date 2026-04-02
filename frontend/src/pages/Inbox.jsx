@@ -359,6 +359,8 @@ export default function Inbox() {
   // ── Borrar conversación ───────────────────────────────────────────────────
   const [deleteConfirm, setDeleteConfirm] = useState(null); // { id, name } | null
   const [deleting, setDeleting]           = useState(false);
+  // IDs borrados localmente: el polling los filtra para que no reaparezcan
+  const deletedConvIds = useRef(new Set());
 
   const messagesEndRef    = useRef(null);
   const inputRef          = useRef(null);
@@ -380,7 +382,8 @@ export default function Inbox() {
       const res = await api.get('/inbox/conversations?page=1');
       // Backend envuelve la respuesta de Chatwoot: { success, data: { payload: [...] } }
       const payload = res.data?.data?.payload || res.data?.payload || [];
-      const convs = Array.isArray(payload) ? payload : [];
+      const convs = (Array.isArray(payload) ? payload : [])
+        .filter((c) => !deletedConvIds.current.has(c.id));
 
       // Calcular el total de mensajes no leídos en esta carga
       const unreadTotal = convs.reduce((sum, c) => sum + (parseInt(c.unread_count) || 0), 0);
@@ -478,6 +481,8 @@ export default function Inbox() {
     setDeleting(true);
     try {
       await api.delete(`/inbox/conversations/${deleteConfirm.id}`);
+      // Registrar como borrada para que el polling no la restaure
+      deletedConvIds.current.add(deleteConfirm.id);
       // Optimistic: quitar de la lista local de inmediato
       setConversations((prev) => prev.filter((c) => c.id !== deleteConfirm.id));
       if (activeConvId === deleteConfirm.id) {
