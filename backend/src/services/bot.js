@@ -139,6 +139,28 @@ function buildSynonymQueries(mensaje, synonymsRaw) {
 }
 
 /**
+ * Genera un bloque de texto con los grupos de sinónimos configurados para incluir
+ * en el system prompt. Esto le enseña a GPT que ciertos términos son equivalentes,
+ * para que cuando el cliente diga "campera" y el catálogo tenga "chaqueta", los conecte.
+ *
+ * @param {string} synonymsRaw - Valor de BOT_SYNONYMS de la config
+ * @returns {string} Bloque de texto o string vacío si no hay sinónimos
+ */
+function buildSynonymsBlock(synonymsRaw) {
+  if (!synonymsRaw || !synonymsRaw.trim()) return '';
+
+  const groups = synonymsRaw
+    .split('\n')
+    .map((line) => line.split(',').map((t) => t.trim()).filter(Boolean))
+    .filter((g) => g.length > 1);
+
+  if (groups.length === 0) return '';
+
+  const lines = groups.map((g) => g.join(' = '));
+  return `\n\nSINÓNIMOS DE PRODUCTOS (términos equivalentes configurados por la tienda):\n${lines.join('\n')}\nCuando el cliente use cualquiera de estos términos, reconocelos como equivalentes al buscar o recomendar productos.`;
+}
+
+/**
  * Verifica si la hora actual (Argentina UTC-3) está dentro del horario configurado.
  * El rango es inclusivo en el inicio y exclusivo en el fin.
  *
@@ -336,8 +358,12 @@ export async function generateBotResponse(userMessage, conversationHistory = [],
   // y "2" = "38" (inferiores), y que el talle único es universal en prendas superiores.
   const sizeRules = getSizeRulesBlock();
 
-  // System prompt = instrucciones del usuario + campaña + conocimiento + reglas de talles + productos + regla anti-alucinación
-  const systemPrompt = config.prompt + campaignBlock + knowledgeContext + sizeRules + productosContext + antiHallucinationRule;
+  // Reglas de sinónimos: le enseña a GPT que ciertos términos son equivalentes
+  // para que reconozca "chaqueta greek" aunque el cliente diga "campera greek".
+  const synonymsBlock = buildSynonymsBlock(config.synonymsRaw);
+
+  // System prompt = instrucciones del usuario + campaña + conocimiento + sinónimos + reglas de talles + productos + regla anti-alucinación
+  const systemPrompt = config.prompt + campaignBlock + knowledgeContext + synonymsBlock + sizeRules + productosContext + antiHallucinationRule;
 
   const response = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
