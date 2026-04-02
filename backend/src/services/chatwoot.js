@@ -196,6 +196,25 @@ export async function getConversation(conversationId) {
  * @param {number} conversationId - ID de la conversación
  * @returns {Promise<void>}
  */
+/**
+ * Cambia el estado de una conversación a "resolved".
+ * Usado al borrar una conversación desde el inbox local:
+ * como getConversations filtra por status=open, la conversación
+ * deja de aparecer en el polling automáticamente.
+ *
+ * @param {number} conversationId - ID de la conversación
+ * @returns {Promise<void>}
+ */
+export async function resolveConversation(conversationId) {
+  try {
+    await chatwootClient.patch(`/conversations/${conversationId}`, { status: 'resolved' });
+    console.log(`[Chatwoot] Conversación ${conversationId} marcada como resuelta`);
+  } catch (err) {
+    console.warn('[Chatwoot] Error al resolver conversación:', err.response?.data || err.message);
+    throw err;
+  }
+}
+
 export async function markConversationAsRead(conversationId) {
   try {
     await chatwootClient.post(`/conversations/${conversationId}/update_last_seen`);

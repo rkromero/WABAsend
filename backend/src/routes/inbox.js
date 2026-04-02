@@ -10,7 +10,7 @@
 
 import { Router } from 'express';
 import multer from 'multer';
-import { getConversations, getMessages, sendMessageToConversation, getConversation, markConversationAsRead } from '../services/chatwoot.js';
+import { getConversations, getMessages, sendMessageToConversation, getConversation, markConversationAsRead, resolveConversation } from '../services/chatwoot.js';
 import { getConfig, uploadMediaToMeta, sendMediaMessage } from '../services/whatsapp.js';
 import { query } from '../db/index.js';
 import axios from 'axios';
@@ -304,6 +304,47 @@ router.post('/conversations/:id/media', upload.single('file'), async (req, res) 
     });
   } catch (err) {
     console.error('[Inbox] POST media error:', err.response?.data || err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/inbox/conversations/:id — borrar conversación
+// Resuelve en Chatwoot (desaparece del polling) y limpia datos locales asociados.
+router.delete('/conversations/:id', async (req, res) => {
+  const conversationId = parseInt(req.params.id);
+  if (isNaN(conversationId)) {
+    return res.status(400).json({ success: false, error: 'ID de conversación inválido' });
+  }
+
+  try {
+    // Obtener el teléfono antes de resolver (necesario para limpiar tablas por telefono)
+    let telefono = null;
+    try {
+      telefono = await getTelefonoFromConversation(conversationId);
+    } catch {
+      // Si Chatwoot ya no tiene la conversación, igual limpiamos lo que podamos
+      console.warn(`[Inbox] No se pudo obtener teléfono para conversación ${conversationId} — limpiando solo por ID`);
+    }
+
+    // 1. Resolver en Chatwoot para que deje de aparecer en el polling (status=open)
+    await resolveConversation(conversationId);
+
+    // 2. Limpiar datos locales relacionados a esta conversación
+    await query(
+      'DELETE FROM waba_conversation_tags WHERE conversacion_chatwoot_id = $1',
+      [conversationId]
+    );
+
+    if (telefono) {
+      // Limpiar override de bot (takeover) y followups del teléfono
+      await query('DELETE FROM waba_conversation_overrides WHERE telefono = $1', [telefono]);
+      await query('DELETE FROM waba_conversation_followups WHERE telefono = $1', [telefono]);
+    }
+
+    console.log(`[Inbox] Conversación ${conversationId} eliminada (telefono: ${telefono || 'desconocido'})`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Inbox] DELETE conversation error:', err.response?.data || err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });

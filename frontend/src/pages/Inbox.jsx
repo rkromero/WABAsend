@@ -124,7 +124,7 @@ function MessageSkeleton() {
 }
 
 /** Una fila en la lista de conversaciones */
-function ConversationItem({ conversation, isActive, onClick, tags }) {
+function ConversationItem({ conversation, isActive, onClick, onDelete, tags }) {
   const contact = conversation.meta?.sender || {};
   const name = contact.name || contact.phone_number || 'Desconocido';
   const phone = contact.phone_number || '';
@@ -133,46 +133,57 @@ function ConversationItem({ conversation, isActive, onClick, tags }) {
   const preview = conversation.last_non_activity_message?.content || '';
 
   return (
-    <button
-      onClick={onClick}
-      className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.04] ${
-        isActive ? 'bg-accent/10 border-l-2 border-accent' : 'border-l-2 border-transparent'
-      }`}
-    >
-      {/* Avatar con iniciales */}
-      <div className="w-10 h-10 rounded-full bg-base-elevated border border-base-border flex items-center justify-center shrink-0">
-        <span className="text-xs font-medium text-gray-300">{getInitials(name)}</span>
-      </div>
-
-      {/* Info */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between gap-1 mb-0.5">
-          <span className="text-sm font-medium text-white truncate">{name}</span>
-          <span className="text-[10px] text-gray-600 shrink-0">{formatTimestamp(lastMessage)}</span>
+    <div className="relative group">
+      <button
+        onClick={onClick}
+        className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.04] ${
+          isActive ? 'bg-accent/10 border-l-2 border-accent' : 'border-l-2 border-transparent'
+        }`}
+      >
+        {/* Avatar con iniciales */}
+        <div className="w-10 h-10 rounded-full bg-base-elevated border border-base-border flex items-center justify-center shrink-0">
+          <span className="text-xs font-medium text-gray-300">{getInitials(name)}</span>
         </div>
-        <div className="flex items-center justify-between gap-1">
-          <span className="text-xs text-gray-500 truncate">{preview || phone}</span>
-          {unreadCount > 0 && (
-            <span className="shrink-0 min-w-[18px] h-[18px] rounded-full bg-accent text-[10px] font-bold text-base flex items-center justify-center px-1">
-              {unreadCount > 99 ? '99+' : unreadCount}
-            </span>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0 pr-6">
+          <div className="flex items-center justify-between gap-1 mb-0.5">
+            <span className="text-sm font-medium text-white truncate">{name}</span>
+            <span className="text-[10px] text-gray-600 shrink-0">{formatTimestamp(lastMessage)}</span>
+          </div>
+          <div className="flex items-center justify-between gap-1">
+            <span className="text-xs text-gray-500 truncate">{preview || phone}</span>
+            {unreadCount > 0 && (
+              <span className="shrink-0 min-w-[18px] h-[18px] rounded-full bg-accent text-[10px] font-bold text-base flex items-center justify-center px-1">
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </div>
+          {/* Tags de la conversación */}
+          {tags && tags.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1.5">
+              {tags.map((tag) => (
+                <span
+                  key={tag}
+                  className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full border ${getTagStyle(tag)}`}
+                >
+                  {getTagLabel(tag)}
+                </span>
+              ))}
+            </div>
           )}
         </div>
-        {/* Tags de la conversación */}
-        {tags && tags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-1.5">
-            {tags.map((tag) => (
-              <span
-                key={tag}
-                className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full border ${getTagStyle(tag)}`}
-              >
-                {getTagLabel(tag)}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-    </button>
+      </button>
+
+      {/* Icono de borrar — aparece al hacer hover sobre la fila */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onDelete(conversation.id, name); }}
+        title="Eliminar conversación"
+        className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-md text-gray-600 hover:text-red-400 hover:bg-red-400/10"
+      >
+        <Trash2 size={13} />
+      </button>
+    </div>
   );
 }
 
@@ -345,6 +356,10 @@ export default function Inbox() {
   const [showTagAdd, setShowTagAdd]       = useState(false);
   const [newTagInput, setNewTagInput]     = useState('');
 
+  // ── Borrar conversación ───────────────────────────────────────────────────
+  const [deleteConfirm, setDeleteConfirm] = useState(null); // { id, name } | null
+  const [deleting, setDeleting]           = useState(false);
+
   const messagesEndRef    = useRef(null);
   const inputRef          = useRef(null);
   // Ref para detectar nuevos mensajes sin re-renders: guarda el total de
@@ -457,6 +472,26 @@ export default function Inbox() {
       setBotPaused(false);
     }
   }, [activeConvId]);
+
+  async function handleDeleteConversation() {
+    if (!deleteConfirm || deleting) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/inbox/conversations/${deleteConfirm.id}`);
+      // Optimistic: quitar de la lista local de inmediato
+      setConversations((prev) => prev.filter((c) => c.id !== deleteConfirm.id));
+      if (activeConvId === deleteConfirm.id) {
+        setActiveConvId(null);
+        setMessages([]);
+      }
+      toast.success('Conversación eliminada');
+    } catch {
+      toast.error('No se pudo eliminar la conversación');
+    } finally {
+      setDeleting(false);
+      setDeleteConfirm(null);
+    }
+  }
 
   async function handleToggleBot() {
     if (!activeConvId || togglingBot) return;
@@ -790,6 +825,7 @@ export default function Inbox() {
                 conversation={conv}
                 isActive={conv.id === activeConvId}
                 onClick={() => openConversation(conv.id)}
+                onDelete={(id, name) => setDeleteConfirm({ id, name })}
                 tags={allTags[conv.id] || []}
               />
             ))
@@ -1275,6 +1311,43 @@ export default function Inbox() {
                 className="px-4 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors"
               >
                 Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Modal: confirmar borrado de conversación ─────────────────────── */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-base-surface border border-base-border rounded-2xl w-full max-w-sm shadow-2xl">
+            <div className="px-5 py-4 border-b border-base-border flex items-center gap-2">
+              <Trash2 size={15} className="text-red-400 shrink-0" />
+              <h2 className="text-sm font-display font-bold text-white">Eliminar conversación</h2>
+            </div>
+            <div className="px-5 py-4">
+              <p className="text-sm text-gray-300">
+                ¿Seguro que querés eliminar la conversación con{' '}
+                <span className="font-medium text-white">{deleteConfirm.name}</span>?
+              </p>
+              <p className="text-xs text-gray-500 mt-1.5">
+                Se eliminará de la bandeja y no podrá recuperarse.
+              </p>
+            </div>
+            <div className="px-5 py-3 border-t border-base-border flex items-center justify-end gap-2">
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                disabled={deleting}
+                className="px-4 py-1.5 text-xs text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleDeleteConversation}
+                disabled={deleting}
+                className="px-4 py-1.5 text-xs font-medium bg-red-500/20 border border-red-500/40 text-red-400 hover:bg-red-500/30 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {deleting ? 'Eliminando...' : 'Eliminar'}
               </button>
             </div>
           </div>
