@@ -82,9 +82,15 @@ export async function getBotConfig() {
 }
 
 /**
- * Expande un mensaje de búsqueda usando los grupos de sinónimos configurados.
- * Si el mensaje contiene un término que pertenece a un grupo, agrega sus equivalentes
- * al final de la query para que la búsqueda los considere también.
+ * Genera todas las queries de búsqueda posibles aplicando sinónimos.
+ *
+ * En lugar de concatenar todos los sinónimos en una sola cadena (que rompe el FTS
+ * con AND implícito), genera una query por cada sustitución posible. Así:
+ *   "campera greek" + grupo [campera, chaqueta, jacket, abrigo]
+ *   → ["campera greek", "chaqueta greek", "jacket greek", "abrigo greek"]
+ *
+ * Esto permite que `searchRelevantProducts` encuentre "chaqueta greek" aunque
+ * el usuario haya buscado "campera greek".
  *
  * Formato de synonymsRaw: cada línea es un grupo, términos separados por coma.
  * Ejemplo:
@@ -93,10 +99,10 @@ export async function getBotConfig() {
  *
  * @param {string} mensaje      - Mensaje original del usuario
  * @param {string} synonymsRaw  - Valor de BOT_SYNONYMS de la config
- * @returns {string} Mensaje expandido con sinónimos adicionales
+ * @returns {string[]} Array de queries (siempre incluye el mensaje original primero)
  */
-function expandWithSynonyms(mensaje, synonymsRaw) {
-  if (!synonymsRaw || !synonymsRaw.trim()) return mensaje;
+function buildSynonymQueries(mensaje, synonymsRaw) {
+  if (!synonymsRaw || !synonymsRaw.trim()) return [mensaje];
 
   // Parsear los grupos: cada línea es un grupo, términos separados por coma
   const groups = synonymsRaw
@@ -104,34 +110,32 @@ function expandWithSynonyms(mensaje, synonymsRaw) {
     .map((line) => line.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean))
     .filter((g) => g.length > 1);
 
-  if (groups.length === 0) return mensaje;
+  if (groups.length === 0) return [mensaje];
 
   const mensajeLower = mensaje.toLowerCase();
-  const additions = [];
+  const queries = [mensaje]; // el original siempre va primero
 
   for (const group of groups) {
-    // Verificar si algún término del grupo aparece en el mensaje
-    const matchedTerm = group.find((term) => {
-      // Buscar como palabra completa para evitar falsos positivos
-      const regex = new RegExp(`\\b${term}\\b`, 'i');
-      return regex.test(mensajeLower);
-    });
+    // Verificar si algún término del grupo aparece en el mensaje como palabra completa
+    const matchedTerm = group.find((term) =>
+      new RegExp(`\\b${term}\\b`, 'i').test(mensajeLower)
+    );
 
     if (matchedTerm) {
-      // Agregar los otros términos del grupo que no estén ya en el mensaje
+      // Generar una query por cada sinónimo reemplazando el término original
+      // Ej: "campera greek" + matchedTerm="campera" + synonym="chaqueta" → "chaqueta greek"
       for (const synonym of group) {
-        if (synonym !== matchedTerm && !new RegExp(`\\b${synonym}\\b`, 'i').test(mensajeLower)) {
-          additions.push(synonym);
+        if (synonym === matchedTerm) continue;
+        const replaced = mensaje.replace(new RegExp(`\\b${matchedTerm}\\b`, 'gi'), synonym);
+        if (!queries.includes(replaced)) {
+          queries.push(replaced);
         }
       }
+      console.log(`[Bot] Sinónimos: "${mensaje.substring(0, 50)}" → ${queries.length} variantes`);
     }
   }
 
-  if (additions.length === 0) return mensaje;
-
-  const expanded = `${mensaje} ${additions.join(' ')}`;
-  console.log(`[Bot] Sinónimos aplicados: "${mensaje.substring(0, 60)}" → "${expanded.substring(0, 80)}"`);
-  return expanded;
+  return queries;
 }
 
 /**
@@ -278,18 +282,36 @@ export async function generateBotResponse(userMessage, conversationHistory = [],
     }
   }
 
-  // Expandir la query con sinónimos configurados antes de buscar productos.
-  // Ej: "campera greek" → "campera greek chaqueta jacket" si "campera, chaqueta, jacket" es un grupo.
-  const expandedSearchQuery = expandWithSynonyms(searchQuery, config.synonymsRaw);
+  // Generar todas las variantes de búsqueda con sinónimos.
+  // En lugar de concatenar sinónimos (que rompe el FTS con AND), genera una query
+  // por sustitución: "campera greek" → ["campera greek", "chaqueta greek", "jacket greek"]
+  const synonymQueries = buildSynonymQueries(searchQuery, config.synonymsRaw);
 
   // Buscar productos relevantes en el catálogo según el mensaje del usuario.
-  // Siempre se busca en waba_products (BD local), independientemente de si WooCommerce está conectado.
+  // Si hay sinónimos, buscamos con cada query alternativa y mergeamos resultados
+  // únicos (por nombre de producto) para maximizar la cobertura.
   let productosContext = '';
   try {
-    const products = await searchRelevantProducts(expandedSearchQuery, 6);
-    productosContext = formatProductsForPrompt(products);
-    if (products.length > 0) {
-      console.log(`[Bot] ${products.length} producto(s) relevante(s) inyectados en el prompt`);
+    // Búsqueda principal con la query original
+    const primaryResults = await searchRelevantProducts(synonymQueries[0], 6);
+    const seen = new Set(primaryResults.map((p) => p.nombre));
+    const merged = [...primaryResults];
+
+    // Búsquedas adicionales con cada variante de sinónimo
+    for (let i = 1; i < synonymQueries.length && merged.length < 6; i++) {
+      const extra = await searchRelevantProducts(synonymQueries[i], 6);
+      for (const p of extra) {
+        if (!seen.has(p.nombre)) {
+          seen.add(p.nombre);
+          merged.push(p);
+          if (merged.length >= 6) break;
+        }
+      }
+    }
+
+    productosContext = formatProductsForPrompt(merged);
+    if (merged.length > 0) {
+      console.log(`[Bot] ${merged.length} producto(s) relevante(s) inyectados en el prompt (${synonymQueries.length} variante(s) buscadas)`);
     }
   } catch (err) {
     // No cortamos el bot si falla la búsqueda de productos
