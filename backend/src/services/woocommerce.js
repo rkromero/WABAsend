@@ -543,12 +543,54 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
            setweight(to_tsvector('spanish', coalesce(descripcion_vision, '')), 'B') ||
            setweight(to_tsvector('spanish', coalesce(categorias, '')), 'C')
          ) @@ plainto_tsquery('spanish', $2)
-       ORDER BY rank DESC
+       ORDER BY created_at DESC, rank DESC
        LIMIT $1`,
       [limit, mensaje]
     );
 
     if (ftsResult.rows.length > 0) {
+      // Verificar si el FTS omitió palabras importantes del query (ej: "greek", marcas en inglés).
+      // El diccionario español descarta palabras no reconocidas; si el query era "campera greek"
+      // el FTS puede devolver camperas genéricas y nunca encontrar "Chaqueta Greek".
+      // Solución: si hay palabras del query que no aparecen en ningún nombre de resultado,
+      // buscarlas por ILIKE y mergear — son palabras específicas que el FTS ignoró.
+      const queryWords = mensaje
+        .toLowerCase()
+        .replace(/[^a-záéíóúüñ\s]/gi, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length > 3);
+
+      const resultNamesLower = ftsResult.rows.map((r) => (r.nombre || '').toLowerCase());
+      const missingWords = queryWords.filter(
+        (w) => !resultNamesLower.some((name) => name.includes(w))
+      );
+
+      if (missingWords.length > 0) {
+        // Hay palabras que el FTS ignoró — buscarlas por ILIKE para complementar
+        const missingConds = missingWords.map(
+          (_, i) => `(nombre ILIKE $${i + 2} OR descripcion_vision ILIKE $${i + 2} OR categorias ILIKE $${i + 2})`
+        );
+        try {
+          const ilikeExtra = await query(
+            `SELECT ${PRODUCT_FIELDS} FROM waba_products
+             WHERE activo = true AND stock > 0 AND (${missingConds.join(' OR ')})
+             ORDER BY created_at DESC LIMIT $1`,
+            [limit, ...missingWords.map((w) => `%${w}%`)]
+          );
+          if (ilikeExtra.rows.length > 0) {
+            // Poner los resultados de la palabra faltante primero (más específicos y más nuevos)
+            const seenNames = new Set(ftsResult.rows.map((r) => r.nombre));
+            const augmented = [...ilikeExtra.rows];
+            for (const r of ftsResult.rows) {
+              if (!seenNames.has(r.nombre)) augmented.push(r);
+            }
+            return augmented.slice(0, limit);
+          }
+        } catch {
+          // Si falla la búsqueda complementaria, devolver los resultados FTS originales
+        }
+      }
+
       return ftsResult.rows;
     }
 
@@ -566,11 +608,11 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
     const talles = [...new Set(tallesMatch.map((t) => t.toUpperCase()))];
 
     if (words.length === 0) {
-      // Sin keywords útiles → productos recientes como sugerencia
+      // Sin keywords útiles → productos más nuevos como sugerencia
       const fallback = await query(
         `SELECT ${PRODUCT_FIELDS} FROM waba_products
          WHERE activo = true AND stock > 0
-         ORDER BY updated_at DESC LIMIT $1`,
+         ORDER BY created_at DESC LIMIT $1`,
         [limit]
       );
       return fallback.rows;
@@ -579,7 +621,7 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
     // Intento 2: FTS con OR entre los términos.
     // Cuando el AND es demasiado estricto (ej: "remera manga corta" requiere las 3 palabras),
     // el OR permite encontrar productos donde al menos uno de los términos esté presente.
-    // Los resultados se ordenan por relevancia (más términos coinciden → mayor rank).
+    // Los resultados se ordenan por más nuevos primero; rank como tiebreaker dentro del mismo día.
     // Esto es crítico para búsquedas de atributos como "manga corta" o "tiro alto".
     try {
       // Combinar palabras + talles para el OR query (FTS no aplica a talles cortos,
@@ -601,7 +643,7 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
              setweight(to_tsvector('spanish', coalesce(descripcion_vision, '')), 'B') ||
              setweight(to_tsvector('spanish', coalesce(categorias, '')), 'C')
            ) @@ to_tsquery('spanish', $2)
-         ORDER BY rank DESC
+         ORDER BY created_at DESC, rank DESC
          LIMIT $1`,
         [limit, orTsQuery]
       );
@@ -641,7 +683,7 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
     const ilikeResult = await query(
       `SELECT ${PRODUCT_FIELDS} FROM waba_products
        WHERE activo = true AND stock > 0 AND (${combined})
-       ORDER BY (nombre ILIKE $2) DESC, updated_at DESC
+       ORDER BY created_at DESC, (nombre ILIKE $2) DESC
        LIMIT $1`,
       params
     );

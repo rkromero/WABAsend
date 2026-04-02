@@ -319,21 +319,28 @@ export async function generateBotResponse(userMessage, conversationHistory = [],
     const seen = new Set(primaryResults.map((p) => p.nombre));
     const merged = [...primaryResults];
 
-    // Búsquedas adicionales con cada variante de sinónimo
-    for (let i = 1; i < synonymQueries.length && merged.length < 6; i++) {
+    // Búsquedas adicionales con cada variante de sinónimo.
+    // IMPORTANTE: se ejecutan SIEMPRE, sin importar cuántos resultados primarios haya.
+    // La búsqueda primaria puede devolver resultados incorrectos porque el FTS español
+    // descarta palabras no reconocidas (ej: "greek", marcas en inglés). Si "campera greek"
+    // devuelve 6 camperas genéricas (porque "greek" fue ignorada por el dict español),
+    // sin este loop nunca se buscaría "chaqueta greek" y nunca se encontraría "Chaqueta Greek".
+    for (let i = 1; i < synonymQueries.length; i++) {
       const extra = await searchRelevantProducts(synonymQueries[i], 6);
       for (const p of extra) {
         if (!seen.has(p.nombre)) {
           seen.add(p.nombre);
           merged.push(p);
-          if (merged.length >= 6) break;
         }
       }
     }
 
-    productosContext = formatProductsForPrompt(merged);
-    if (merged.length > 0) {
-      console.log(`[Bot] ${merged.length} producto(s) relevante(s) inyectados en el prompt (${synonymQueries.length} variante(s) buscadas)`);
+    // Limitar a 8 resultados para no sobrecargar el prompt de GPT.
+    // Los primeros 6 son del resultado primario; los adicionales son aportes de sinónimos.
+    const finalProducts = merged.slice(0, 8);
+    productosContext = formatProductsForPrompt(finalProducts);
+    if (finalProducts.length > 0) {
+      console.log(`[Bot] ${finalProducts.length} producto(s) relevante(s) inyectados en el prompt (${synonymQueries.length} variante(s) buscadas)`);
     }
   } catch (err) {
     // No cortamos el bot si falla la búsqueda de productos
