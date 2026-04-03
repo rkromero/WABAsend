@@ -9,6 +9,8 @@
 
 import { Router } from 'express';
 import { query } from '../db/index.js';
+import { getBotConfig } from '../services/bot.js';
+import { searchRelevantProducts } from '../services/woocommerce.js';
 
 const router = Router();
 
@@ -78,6 +80,65 @@ router.put('/', async (req, res) => {
     res.json({ success: true, data: { message: 'Configuración del bot guardada correctamente' } });
   } catch (err) {
     console.error('[Bot] PUT error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/bot/test-search?q=campera+greek
+// Endpoint de diagnóstico: muestra qué productos encuentra el bot para un mensaje dado,
+// con y sin expansión de sinónimos.
+router.get('/test-search', async (req, res) => {
+  const mensaje = String(req.query.q || '').trim();
+  if (!mensaje) {
+    return res.status(400).json({ success: false, error: 'Falta el parámetro ?q=' });
+  }
+
+  try {
+    const config = await getBotConfig();
+    const synonymsRaw = config.synonymsRaw;
+
+    // Parsear grupos de sinónimos (misma lógica que buildSynonymQueries en bot.js)
+    const groups = synonymsRaw
+      ? synonymsRaw
+          .split('\n')
+          .map((line) => line.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean))
+          .filter((g) => g.length > 1)
+      : [];
+
+    const mensajeLower = mensaje.toLowerCase();
+    const queries = [mensaje];
+    for (const group of groups) {
+      const matchedTerm = group.find((term) =>
+        new RegExp(`\\b${term}\\b`, 'i').test(mensajeLower)
+      );
+      if (matchedTerm) {
+        for (const synonym of group) {
+          if (synonym === matchedTerm) continue;
+          const replaced = mensaje.replace(new RegExp(`\\b${matchedTerm}\\b`, 'gi'), synonym);
+          if (!queries.includes(replaced)) queries.push(replaced);
+        }
+      }
+    }
+
+    const results = [];
+    for (const q of queries) {
+      const products = await searchRelevantProducts(q, 6);
+      results.push({
+        query: q,
+        products: products.map((p) => ({ nombre: p.nombre, stock: p.stock, precio: p.precio })),
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        mensaje,
+        synonymsRaw,
+        queriesGenerated: queries,
+        results,
+      },
+    });
+  } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
