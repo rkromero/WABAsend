@@ -196,7 +196,7 @@ async function fetchVariations(productId) {
  */
 export function detectGarmentCategory(nombre, categorias) {
   const text = `${nombre} ${categorias}`.toLowerCase();
-  if (/sweater|remera|blusa|camisa|top\b|camiseta|musculosa|body\b|cardigan|chaleco|túnica|tunica/.test(text)) {
+  if (/sweater|remera|blusa|camisa|top\b|camiseta|musculosa|body\b|cardigan|chaleco|túnica|tunica|chaqueta|campera|abrigo|blazer|tapado|saco\b/.test(text)) {
     return 'parte_arriba';
   }
   if (/pantalon|pantalón|jean|jeans|short\b|bermuda|capri/.test(text)) {

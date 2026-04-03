@@ -161,5 +161,6 @@ SISTEMA DE TALLES — REGLAS DE EQUIVALENCIA:
   36=1, 38=2, 40=3, 42=4. Son exactamente lo mismo, solo distinto formato.
   Talle Único NO es universal en esta categoría.
 • Cuando los talles del catálogo aparecen con anotaciones (ej: "M(=2)", "38(=1)"),
-  son formas equivalentes del mismo talle.`;
+  son formas equivalentes del mismo talle.
+• CRÍTICO: Solo podés mencionar los talles que aparecen explícitamente en "Talles disponibles" del producto. Nunca inferir ni agregar talles que no estén listados.`;
 }
