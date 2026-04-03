@@ -316,27 +316,31 @@ export async function generateBotResponse(userMessage, conversationHistory = [],
   try {
     // Búsqueda principal con la query original
     const primaryResults = await searchRelevantProducts(synonymQueries[0], 6);
-    const seen = new Set(primaryResults.map((p) => p.nombre));
-    const merged = [...primaryResults];
 
-    // Búsquedas adicionales con cada variante de sinónimo.
-    // IMPORTANTE: se ejecutan SIEMPRE, sin importar cuántos resultados primarios haya.
-    // La búsqueda primaria puede devolver resultados incorrectos porque el FTS español
-    // descarta palabras no reconocidas (ej: "greek", marcas en inglés). Si "campera greek"
-    // devuelve 6 camperas genéricas (porque "greek" fue ignorada por el dict español),
-    // sin este loop nunca se buscaría "chaqueta greek" y nunca se encontraría "Chaqueta Greek".
+    // Búsquedas con variantes de sinónimo — siempre se ejecutan.
+    // Los resultados de sinónimos van PRIMERO porque son más específicos:
+    // si el usuario pide "campera greek" y encontramos "chaqueta greek" vía sinónimo,
+    // ese producto debe aparecer al tope de la lista para que GPT lo identifique
+    // correctamente, antes que las camperas genéricas del resultado primario.
+    const synonymResults = [];
+    const synonymSeen = new Set();
     for (let i = 1; i < synonymQueries.length; i++) {
       const extra = await searchRelevantProducts(synonymQueries[i], 6);
       for (const p of extra) {
-        if (!seen.has(p.nombre)) {
-          seen.add(p.nombre);
-          merged.push(p);
+        if (!synonymSeen.has(p.nombre)) {
+          synonymSeen.add(p.nombre);
+          synonymResults.push(p);
         }
       }
     }
 
+    // Mergear: sinónimos primero, luego primarios que no estén ya en sinónimos
+    const merged = [...synonymResults];
+    for (const p of primaryResults) {
+      if (!synonymSeen.has(p.nombre)) merged.push(p);
+    }
+
     // Limitar a 8 resultados para no sobrecargar el prompt de GPT.
-    // Los primeros 6 son del resultado primario; los adicionales son aportes de sinónimos.
     const finalProducts = merged.slice(0, 8);
     productosContext = formatProductsForPrompt(finalProducts);
     if (finalProducts.length > 0) {
