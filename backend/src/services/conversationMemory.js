@@ -124,6 +124,26 @@ export async function getConversationHistory(telefono) {
 }
 
 /**
+ * Elimina todo el historial de conversación de un número de teléfono.
+ * Se llama al borrar una conversación para que la siguiente sesión empiece limpia.
+ *
+ * @param {string} telefono
+ */
+export async function clearConversationHistory(telefono) {
+  try {
+    const redis = await getRedis();
+    if (redis) {
+      await redis.del(`${REDIS_KEY_PREFIX}${telefono}`);
+    }
+    // Siempre limpiar PostgreSQL también (puede haber datos previos a Redis)
+    await query('DELETE FROM waba_bot_history WHERE telefono = $1', [telefono]);
+    console.log(`[Memory] Historial eliminado para ${telefono}`);
+  } catch (err) {
+    console.error('[Memory] Error al limpiar historial:', err.message);
+  }
+}
+
+/**
  * Persiste el par user/assistant en el historial de la conversación.
  * Debe llamarse después de que el LLM generó su respuesta.
  *

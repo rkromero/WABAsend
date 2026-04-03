@@ -13,6 +13,7 @@ import multer from 'multer';
 import { getConversations, getMessages, sendMessageToConversation, getConversation, markConversationAsRead, resolveConversation } from '../services/chatwoot.js';
 import { getConfig, uploadMediaToMeta, sendMediaMessage } from '../services/whatsapp.js';
 import { query } from '../db/index.js';
+import { clearConversationHistory } from '../services/conversationMemory.js';
 import axios from 'axios';
 
 // Multer en memoria — archivos de hasta 16 MB (límite de WhatsApp para video/audio)
@@ -336,9 +337,10 @@ router.delete('/conversations/:id', async (req, res) => {
     );
 
     if (telefono) {
-      // Limpiar override de bot (takeover) y followups del teléfono
+      // Limpiar override de bot (takeover), followups e historial del bot del teléfono
       await query('DELETE FROM waba_conversation_overrides WHERE telefono = $1', [telefono]);
       await query('DELETE FROM waba_conversation_followups WHERE telefono = $1', [telefono]);
+      await clearConversationHistory(telefono);
     }
 
     console.log(`[Inbox] Conversación ${conversationId} eliminada (telefono: ${telefono || 'desconocido'})`);
