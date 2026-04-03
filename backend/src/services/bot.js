@@ -157,7 +157,7 @@ function buildSynonymsBlock(synonymsRaw) {
   if (groups.length === 0) return '';
 
   const lines = groups.map((g) => g.join(' = '));
-  return `\n\nSINÓNIMOS DE PRODUCTOS (términos equivalentes configurados por la tienda):\n${lines.join('\n')}\nCuando el cliente use cualquiera de estos términos, reconocelos como equivalentes al buscar o recomendar productos.`;
+  return `\n\nSINÓNIMOS DE PRODUCTOS (términos equivalentes configurados por la tienda):\n${lines.join('\n')}\nREGLA CRÍTICA: Si la clienta pide un producto usando cualquiera de estos términos, buscá en la lista de productos disponibles usando TODOS los sinónimos equivalentes. Por ejemplo: si pide "campera greek" y en el catálogo hay "chaqueta greek", ese ES el producto que está buscando — mostráselo. No digas que no tenés si hay un producto equivalente con otro nombre del grupo.`;
 }
 
 /**
