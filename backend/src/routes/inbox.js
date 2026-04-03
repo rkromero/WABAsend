@@ -323,9 +323,22 @@ router.delete('/conversations/:id', async (req, res) => {
     try {
       telefono = await getTelefonoFromConversation(conversationId);
     } catch {
-      // Si Chatwoot ya no tiene la conversación, igual limpiamos lo que podamos
-      console.warn(`[Inbox] No se pudo obtener teléfono para conversación ${conversationId} — limpiando solo por ID`);
+      console.warn(`[Inbox] No se pudo obtener teléfono de Chatwoot para conversación ${conversationId} — usando fallback local`);
     }
+
+    // Fallback: buscar el teléfono en la tabla local si Chatwoot no lo devolvió
+    if (!telefono) {
+      const localRow = await query(
+        'SELECT telefono FROM incoming_messages WHERE chatwoot_conversation_id = $1 LIMIT 1',
+        [conversationId]
+      );
+      if (localRow.rows.length > 0) {
+        telefono = localRow.rows[0].telefono;
+        console.log(`[Inbox] Teléfono obtenido del fallback local: ${telefono}`);
+      }
+    }
+
+    console.log(`[Inbox] Eliminando conversación ${conversationId} (telefono: ${telefono || 'desconocido'})`);
 
     // 1. Resolver en Chatwoot para que deje de aparecer en el polling (status=open)
     await resolveConversation(conversationId);
