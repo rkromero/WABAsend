@@ -566,9 +566,14 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
       );
 
       if (missingWords.length > 0) {
-        // Hay palabras que el FTS ignoró — buscarlas por ILIKE para complementar
+        // Hay palabras que el FTS ignoró — buscarlas por ILIKE SOLO EN NOMBRE.
+        // No buscar en descripcion_vision porque palabras como "combine", "mostrar",
+        // "quiero" aparecen en las descripciones de muchos productos con sentido
+        // estilístico (ej: "se combina con..."), generando falsos positivos que
+        // desplazan a los productos reales (ej: buscar "jean" devuelve cardigans
+        // cuya descripción dice "combiná con un jean").
         const missingConds = missingWords.map(
-          (_, i) => `(nombre ILIKE $${i + 2} OR descripcion_vision ILIKE $${i + 2} OR categorias ILIKE $${i + 2})`
+          (_, i) => `(nombre ILIKE $${i + 2} OR categorias ILIKE $${i + 2})`
         );
         try {
           const ilikeExtra = await query(
