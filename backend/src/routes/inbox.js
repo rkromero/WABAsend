@@ -10,7 +10,7 @@
 
 import { Router } from 'express';
 import multer from 'multer';
-import { getConversations, getMessages, sendMessageToConversation, getConversation, markConversationAsRead, resolveConversation } from '../services/chatwoot.js';
+import { getConversations, getMessages, sendMessageToConversation, getConversation, markConversationAsRead, resolveConversation, deleteConversation } from '../services/chatwoot.js';
 import { getConfig, uploadMediaToMeta, sendMediaMessage } from '../services/whatsapp.js';
 import { query } from '../db/index.js';
 import { clearConversationHistory } from '../services/conversationMemory.js';
@@ -340,8 +340,9 @@ router.delete('/conversations/:id', async (req, res) => {
 
     console.log(`[Inbox] Eliminando conversación ${conversationId} (telefono: ${telefono || 'desconocido'})`);
 
-    // 1. Resolver en Chatwoot para que deje de aparecer en el polling (status=open)
-    await resolveConversation(conversationId);
+    // 1. Eliminar de Chatwoot (DELETE permanente, fallback a resolve si no soportado)
+    // Esto borra los mensajes de Chatwoot para que no reaparezcan al reabrir
+    await deleteConversation(conversationId);
 
     // 2. Limpiar datos locales relacionados a esta conversación
     await query(

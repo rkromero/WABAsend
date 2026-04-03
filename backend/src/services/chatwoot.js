@@ -215,6 +215,31 @@ export async function resolveConversation(conversationId) {
   }
 }
 
+/**
+ * Elimina permanentemente una conversación de Chatwoot (DELETE).
+ * Si el endpoint no existe (versión antigua), hace fallback a resolveConversation.
+ * Usar al borrar desde el inbox local para que no queden mensajes viejos al reabrir.
+ *
+ * @param {number} conversationId - ID de la conversación
+ * @returns {Promise<void>}
+ */
+export async function deleteConversation(conversationId) {
+  try {
+    await chatwootClient.delete(`/conversations/${conversationId}`);
+    console.log(`[Chatwoot] Conversación ${conversationId} eliminada permanentemente`);
+  } catch (err) {
+    // Si el endpoint no existe (404) o no está autorizado (403), fallback a resolve
+    const status = err.response?.status;
+    if (status === 404 || status === 403 || status === 405) {
+      console.warn(`[Chatwoot] DELETE no soportado (${status}), resolviendo en su lugar`);
+      await resolveConversation(conversationId);
+    } else {
+      console.warn('[Chatwoot] Error al eliminar conversación:', err.response?.data || err.message);
+      throw err;
+    }
+  }
+}
+
 export async function markConversationAsRead(conversationId) {
   try {
     await chatwootClient.post(`/conversations/${conversationId}/update_last_seen`);
