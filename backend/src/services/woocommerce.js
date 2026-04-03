@@ -654,6 +654,40 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
       );
 
       if (ftsorResult.rows.length > 0) {
+        // Mismo check de palabras faltantes que en intento 1:
+        // El FTS OR puede devolver resultados que matchean palabras genéricas del mensaje
+        // (ej: "combinar" para "jean que combine"), ignorando el término de producto real ("jean").
+        // Si alguna palabra del query no aparece en los nombres de los resultados, la buscamos
+        // por ILIKE y mergeamos para no perder el producto específico que el usuario pidió.
+        const orResultNamesLower = ftsorResult.rows.map((r) => (r.nombre || '').toLowerCase());
+        const orMissingWords = words.filter(
+          (w) => !orResultNamesLower.some((name) => name.includes(w))
+        );
+
+        if (orMissingWords.length > 0) {
+          const orMissingConds = orMissingWords.map(
+            (_, i) => `(nombre ILIKE $${i + 2} OR descripcion_vision ILIKE $${i + 2} OR categorias ILIKE $${i + 2})`
+          );
+          try {
+            const orIlikeExtra = await query(
+              `SELECT ${PRODUCT_FIELDS} FROM waba_products
+               WHERE activo = true AND stock > 0 AND (${orMissingConds.join(' OR ')})
+               ORDER BY created_at DESC LIMIT $1`,
+              [limit, ...orMissingWords.map((w) => `%${w}%`)]
+            );
+            if (orIlikeExtra.rows.length > 0) {
+              const orSeen = new Set(ftsorResult.rows.map((r) => r.nombre));
+              const orAugmented = [...orIlikeExtra.rows];
+              for (const r of ftsorResult.rows) {
+                if (!orSeen.has(r.nombre)) orAugmented.push(r);
+              }
+              return orAugmented.slice(0, limit);
+            }
+          } catch {
+            // Si falla la búsqueda complementaria, devolver los resultados FTS OR originales
+          }
+        }
+
         return ftsorResult.rows;
       }
     } catch {

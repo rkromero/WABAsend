@@ -397,15 +397,29 @@ export async function generateBotResponse(userMessage, conversationHistory = [],
 }
 
 /**
- * Valida que todas las URLs mencionadas en la respuesta del bot existan
- * como permalinks activos en el catálogo de productos (waba_products).
+ * Normaliza una URL para comparación: lowercase, sin trailing slash,
+ * sin puntuación suelta al final.
+ * Ej: "https://Vicca.com.ar/producto/greek/" → "https://vicca.com.ar/producto/greek"
  *
- * Si el bot alucinó una URL que no está en el catálogo, intercepta la
- * respuesta completa y la reemplaza por un mensaje seguro.
- * Si no hay URLs en la respuesta, la devuelve sin cambios.
+ * @param {string} url
+ * @returns {string}
+ */
+function normalizeUrl(url) {
+  return url.toLowerCase().replace(/[.,;:!?]+$/, '').replace(/\/+$/, '');
+}
+
+/**
+ * Valida las URLs mencionadas en la respuesta del bot contra el catálogo real.
+ *
+ * Si el bot incluye URLs inválidas (alucinadas o con formato diferente al DB),
+ * las STRIPEA del texto en lugar de descartar toda la respuesta.
+ * Así el usuario recibe la información del producto correctamente aunque sin link.
+ *
+ * La comparación es normalizada (case-insensitive, trailing slash opcional) para
+ * evitar falsos negativos por diferencias mínimas de formato.
  *
  * @param {string} text - Respuesta generada por el bot
- * @returns {Promise<string>} Respuesta original o mensaje de fallback
+ * @returns {Promise<string>} Respuesta original, con URLs inválidas removidas
  */
 export async function sanitizeBotResponse(text) {
   // Extraer todas las URLs HTTP/HTTPS del texto
@@ -414,23 +428,39 @@ export async function sanitizeBotResponse(text) {
   // Sin URLs → nada que validar
   if (!urlMatches || urlMatches.length === 0) return text;
 
-  // Limpiar puntuación final que puede pegarse a la URL (punto, coma, etc.)
-  const urls = urlMatches.map((u) => u.replace(/[.,;:!?]+$/, ''));
+  // Normalizar URLs extraídas
+  const urls = urlMatches.map((u) => normalizeUrl(u));
 
   try {
+    // Buscar en el DB usando LIKE para cubrir variantes con/sin trailing slash
+    // y comparando en lowercase vía lower().
     const result = await query(
-      'SELECT permalink FROM waba_products WHERE permalink = ANY($1::text[]) AND activo = true AND stock > 0',
+      `SELECT permalink FROM waba_products
+       WHERE activo = true AND stock > 0
+         AND lower(rtrim(permalink, '/')) = ANY($1::text[])`,
       [urls]
     );
 
-    const existingUrls = new Set(result.rows.map((r) => r.permalink));
-    const invalidUrls = urls.filter((u) => !existingUrls.has(u));
+    const existingNormalized = new Set(result.rows.map((r) => normalizeUrl(r.permalink)));
+    const invalidUrls = urls.filter((u) => !existingNormalized.has(u));
 
     if (invalidUrls.length > 0) {
       console.warn(
-        `[Bot] URL(s) no encontrada(s) en el catálogo: ${invalidUrls.join(', ')} — interceptando respuesta`
+        `[Bot] URL(s) inválida(s) en la respuesta: ${invalidUrls.join(', ')} — strippeando del texto`
       );
-      return 'Por ahora no tenemos productos que coincidan exactamente con esa búsqueda. ¿En qué más te puedo ayudar?';
+      // Stripear cada URL inválida del texto junto con posibles etiquetas Markdown
+      // que la rodean: "| Link: https://..." o "[ver acá](https://...)"
+      let sanitized = text;
+      for (const invalidUrl of invalidUrls) {
+        // Buscar la URL original (antes de normalizar) que corresponde a esta URL inválida
+        const originalUrl = urlMatches.find((u) => normalizeUrl(u) === invalidUrl) || invalidUrl;
+        // Remover patrones: "| Link: <url>", "[texto](url)", "Link: <url>", la URL sola
+        sanitized = sanitized
+          .replace(new RegExp(`\\|?\\s*Link:\\s*${escapeRegex(originalUrl)}[^\\s\\)\\]]*`, 'gi'), '')
+          .replace(new RegExp(`\\[([^\\]]+)\\]\\(${escapeRegex(originalUrl)}[^)]*\\)`, 'gi'), '$1')
+          .replace(new RegExp(`${escapeRegex(originalUrl)}\\S*`, 'gi'), '');
+      }
+      return sanitized.trim();
     }
   } catch (err) {
     // Si falla la validación, pasamos la respuesta original — mejor enviar que silenciar
@@ -438,4 +468,13 @@ export async function sanitizeBotResponse(text) {
   }
 
   return text;
+}
+
+/**
+ * Escapa caracteres especiales de regex en una cadena.
+ * @param {string} str
+ * @returns {string}
+ */
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
