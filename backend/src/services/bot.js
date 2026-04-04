@@ -304,6 +304,34 @@ export async function generateBotResponse(userMessage, conversationHistory = [],
     }
   }
 
+  // Detectar pedidos de combinación: "un jean para usar con esa campera" o
+  // "me mostras un jean para combinar con X". La oración completa contamina
+  // la búsqueda — el FTS encuentra "campera" y olvida el "jean" pedido.
+  // Extraemos solo el producto solicitado para usarlo como query de búsqueda.
+  if (!esCorto) {
+    // Patrón 1: "un/una X para usar/combinar/llevar con..."
+    const combinMatch = searchQuery.match(
+      /\bun[ao]?\s+([\w\s]{2,30}?)\s+para\s+(?:usar|combinar|llevar|ponerse|combinarlo|combinarla)\b/i
+    );
+    if (combinMatch) {
+      const producto = combinMatch[1].trim();
+      console.log(`[Bot] Pedido de combinación — buscando producto: "${producto}"`);
+      searchQuery = producto;
+    } else {
+      // Patrón 2: "me mostras/mostrame un/una X" (sin el contexto de combinación)
+      const mostrameMatch = searchQuery.match(
+        /(?:me\s+mostras|mostras|mostrás|mostrame)\s+(?:un[ao]?\s+)?([\w\s]{2,30}?)(?:\s+para\b|$)/i
+      );
+      if (mostrameMatch) {
+        const producto = mostrameMatch[1].trim();
+        if (producto.split(/\s+/).length <= 4) { // Máx 4 palabras = producto real, no frase
+          console.log(`[Bot] Pedido directo — buscando producto: "${producto}"`);
+          searchQuery = producto;
+        }
+      }
+    }
+  }
+
   // Generar todas las variantes de búsqueda con sinónimos.
   // En lugar de concatenar sinónimos (que rompe el FTS con AND), genera una query
   // por sustitución: "campera greek" → ["campera greek", "chaqueta greek", "jacket greek"]

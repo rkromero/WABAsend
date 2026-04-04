@@ -599,12 +599,24 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
       return ftsResult.rows;
     }
 
-    // Extraer palabras de búsqueda útiles (> 3 chars, sin puntuación)
+    // Palabras funcionales españolas que no son identificadores de productos.
+    // Buscarlas por ILIKE genera falsos positivos masivos: "para" aparece en la
+    // descripción de prácticamente TODOS los productos ("ideal para...", "perfecta para..."),
+    // "usar" en muchas también, con lo que el ILIKE devuelve los 6 más nuevos al azar.
+    const SEARCH_STOPWORDS = new Set([
+      'para', 'usar', 'usarlo', 'usarla', 'mostras', 'mostrar', 'mostrame',
+      'quiero', 'podes', 'puedo', 'tenes', 'tiene', 'algo', 'otro', 'otra',
+      'este', 'esta', 'esos', 'esas', 'cual', 'como', 'desde', 'hasta',
+      'llevo', 'llevar', 'lleva', 'combina', 'combinar', 'combiná', 'combino',
+      'seria', 'tengo', 'busco', 'ponerse', 'ponme', 'ponerte',
+    ]);
+
+    // Extraer palabras de búsqueda útiles (> 3 chars, sin puntuación, sin funcionales)
     const words = mensaje
       .toLowerCase()
       .replace(/[^a-záéíóúüñ\s]/gi, ' ')
       .split(/\s+/)
-      .filter((w) => w.length > 3);
+      .filter((w) => w.length > 3 && !SEARCH_STOPWORDS.has(w));
 
     // Extraer talles/tallas del mensaje original — pueden ser 1-2 chars (L, M, XL, XS, S, 42, etc.)
     // y quedan filtrados por el criterio de longitud anterior.
@@ -665,8 +677,11 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
         );
 
         if (orMissingWords.length > 0) {
+          // Solo nombre y categorias, igual que en intento 1.
+          // descripcion_vision produce falsos positivos: un cardigan con descripción
+          // "combiná con un jean" aparece antes que los jeans reales.
           const orMissingConds = orMissingWords.map(
-            (_, i) => `(nombre ILIKE $${i + 2} OR descripcion_vision ILIKE $${i + 2} OR categorias ILIKE $${i + 2})`
+            (_, i) => `(nombre ILIKE $${i + 2} OR categorias ILIKE $${i + 2})`
           );
           try {
             const orIlikeExtra = await query(
@@ -699,8 +714,10 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
     // campo devuelve el producto. Ordenado por match en el nombre (más probable).
     // Los talles detectados (L, M, XL, 1, 2, etc.) se buscan solo en variantes para evitar
     // falsos positivos con palabras cortas en nombre o descripción.
+    // NO se busca en descripcion_vision: palabras como "jean" aparecen en descripciones de
+    // otras prendas que "se combinan con jean", generando falsos positivos antes que los jeans reales.
     const wordConditions = words.length > 0
-      ? words.map((_, i) => `(nombre ILIKE $${i + 2} OR descripcion_vision ILIKE $${i + 2} OR categorias ILIKE $${i + 2} OR variantes ILIKE $${i + 2})`)
+      ? words.map((_, i) => `(nombre ILIKE $${i + 2} OR categorias ILIKE $${i + 2} OR variantes ILIKE $${i + 2})`)
       : [];
 
     const talleOffset = 2 + words.length;
