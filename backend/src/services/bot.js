@@ -387,6 +387,16 @@ export async function generateBotResponse(userMessage, conversationHistory = [],
   // en el bloque PRODUCTOS DISPONIBLES EN STOCK. Cualquier URL inventada será interceptada.
   const antiHallucinationRule = '\n\nREGLA IMPORTANTE: Solo podés incluir links/URLs de productos que aparezcan EXACTAMENTE en la lista de PRODUCTOS DISPONIBLES EN STOCK que se te proporcionó. Nunca inventes ni construyas URLs. Si no tenés el link del producto en la lista, describí el producto sin incluir link.';
 
+  // REGLAS DE COMPORTAMIENTO:
+  // Punto 3: Cuando el cliente duda por talle o pide un talle no disponible,
+  //   mencionar proactivamente que todas las compras tienen política de cambio.
+  // Punto 5: Nunca cerrar la conversación derivando al equipo por mensajes confusos —
+  //   pedir clarificación en cambio.
+  const behaviorRules = `\n\nREGLAS DE COMPORTAMIENTO:
+1. POLÍTICA DE CAMBIOS: Cuando una clienta duda si le va a quedar bien, pregunta por un talle que no está disponible, o menciona que no sabe qué talle elegir — siempre aclará que "todos los pedidos tienen cambio". No esperes a que lo pregunten: mencionarlo en ese momento convierte dudas en ventas.
+2. MENSAJES CONFUSOS: Si recibís un mensaje que no entendés bien (dictado de voz mal transcripto, frase incompleta, contexto poco claro), NUNCA respondas con "comunicate con nuestro equipo" ni cerrés la conversación. En cambio, preguntá con amabilidad: "No entendí bien tu consulta, ¿me podés decir qué prenda te interesa?"
+3. NUNCA derivés a "nuestro equipo" como respuesta a una duda de producto — esas consultas las resolvés vos. Solo derivar si es algo administrativo (cambio ya enviado, problema con un pago, etc.).`;
+
   // Contexto de campaña: si la persona está respondiendo a un mensaje saliente,
   // le indicamos al bot de qué trataba ese mensaje para que responda en esa línea.
   const campaignBlock = campaignContext
@@ -401,8 +411,8 @@ export async function generateBotResponse(userMessage, conversationHistory = [],
   // para que reconozca "chaqueta greek" aunque el cliente diga "campera greek".
   const synonymsBlock = buildSynonymsBlock(config.synonymsRaw);
 
-  // System prompt = instrucciones del usuario + campaña + conocimiento + sinónimos + reglas de talles + productos + regla anti-alucinación
-  const systemPrompt = config.prompt + campaignBlock + knowledgeContext + synonymsBlock + sizeRules + productosContext + antiHallucinationRule;
+  // System prompt = instrucciones del usuario + campaña + conocimiento + sinónimos + reglas de talles + productos + regla anti-alucinación + reglas de comportamiento
+  const systemPrompt = config.prompt + campaignBlock + knowledgeContext + synonymsBlock + sizeRules + productosContext + antiHallucinationRule + behaviorRules;
 
   const response = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
