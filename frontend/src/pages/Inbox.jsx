@@ -363,8 +363,10 @@ export default function Inbox() {
   // El polling las filtra SOLO si no tienen actividad nueva posterior al borrado.
   const deletedConvIds = useRef(new Map());
 
-  const messagesEndRef    = useRef(null);
-  const inputRef          = useRef(null);
+  const messagesEndRef      = useRef(null);
+  const messagesContainerRef = useRef(null);
+  const userScrolledUp      = useRef(false); // true cuando el usuario subió manualmente
+  const inputRef            = useRef(null);
   // Ref para detectar nuevos mensajes sin re-renders: guarda el total de
   // unread_count de la última vez que se cargaron las conversaciones.
   // null = carga inicial (no reproducir sonido la primera vez).
@@ -460,6 +462,7 @@ export default function Inbox() {
 
   useEffect(() => {
     if (activeConvId) {
+      userScrolledUp.current = false; // al cambiar de conversación, volver a auto-scroll
       setLoadingMessages(true);
       setMessages([]);
       fetchMessages();
@@ -467,9 +470,11 @@ export default function Inbox() {
     }
   }, [activeConvId]); // eslint-disable-line
 
-  // Auto-scroll al último mensaje cuando llegan nuevos
+  // Auto-scroll al último mensaje solo si el usuario no subió manualmente
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (!userScrolledUp.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
   // ── Estado del bot para la conversación activa ────────────────────────────
@@ -954,7 +959,16 @@ export default function Inbox() {
             </div>
 
             {/* Área de mensajes */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <div
+              ref={messagesContainerRef}
+              className="flex-1 overflow-y-auto p-4 space-y-3"
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                // Si el usuario está a más de 100px del fondo, consideramos que subió
+                const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+                userScrolledUp.current = distanceFromBottom > 100;
+              }}
+            >
               {loadingMessages ? (
                 <MessageSkeleton />
               ) : messages.length === 0 ? (
