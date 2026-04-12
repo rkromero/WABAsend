@@ -527,13 +527,17 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
     // Intento 1: full-text search con diccionario español.
     // plainto_tsquery convierte el mensaje en una query de texto completo con AND implícito,
     // lo que maneja sinónimos, stopwords y variaciones morfológicas mejor que ILIKE.
-    // La columna de búsqueda combina nombre (peso A, más relevante) y descripcion_vision (peso B).
+    // La columna de búsqueda combina nombre (peso A, más relevante), descripcion_vision (peso B),
+    // categorias (peso C) y variantes (peso C). Incluir variantes es crítico para búsquedas por
+    // color: un producto "TRENCH LARGO" con variantes "Beige, Chocolate, Visón" solo tiene el
+    // color en ese campo, y sin él FTS no lo encontraría al buscar "trench beige".
     const ftsResult = await query(
       `SELECT ${PRODUCT_FIELDS},
               ts_rank(
                 setweight(to_tsvector('spanish', coalesce(nombre, '')), 'A') ||
                 setweight(to_tsvector('spanish', coalesce(descripcion_vision, '')), 'B') ||
-                setweight(to_tsvector('spanish', coalesce(categorias, '')), 'C'),
+                setweight(to_tsvector('spanish', coalesce(categorias, '')), 'C') ||
+                setweight(to_tsvector('spanish', coalesce(variantes, '')), 'C'),
                 plainto_tsquery('spanish', $2)
               ) AS rank
        FROM waba_products
@@ -541,7 +545,8 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
          AND (
            setweight(to_tsvector('spanish', coalesce(nombre, '')), 'A') ||
            setweight(to_tsvector('spanish', coalesce(descripcion_vision, '')), 'B') ||
-           setweight(to_tsvector('spanish', coalesce(categorias, '')), 'C')
+           setweight(to_tsvector('spanish', coalesce(categorias, '')), 'C') ||
+           setweight(to_tsvector('spanish', coalesce(variantes, '')), 'C')
          ) @@ plainto_tsquery('spanish', $2)
        ORDER BY created_at DESC, rank DESC
        LIMIT $1`,
@@ -573,7 +578,7 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
         // desplazan a los productos reales (ej: buscar "jean" devuelve cardigans
         // cuya descripción dice "combiná con un jean").
         const missingConds = missingWords.map(
-          (_, i) => `(nombre ILIKE $${i + 2} OR categorias ILIKE $${i + 2})`
+          (_, i) => `(nombre ILIKE $${i + 2} OR categorias ILIKE $${i + 2} OR variantes ILIKE $${i + 2})`
         );
         try {
           const ilikeExtra = await query(
@@ -650,7 +655,8 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
                 ts_rank(
                   setweight(to_tsvector('spanish', coalesce(nombre, '')), 'A') ||
                   setweight(to_tsvector('spanish', coalesce(descripcion_vision, '')), 'B') ||
-                  setweight(to_tsvector('spanish', coalesce(categorias, '')), 'C'),
+                  setweight(to_tsvector('spanish', coalesce(categorias, '')), 'C') ||
+                  setweight(to_tsvector('spanish', coalesce(variantes, '')), 'C'),
                   to_tsquery('spanish', $2)
                 ) AS rank
          FROM waba_products
@@ -658,7 +664,8 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
            AND (
              setweight(to_tsvector('spanish', coalesce(nombre, '')), 'A') ||
              setweight(to_tsvector('spanish', coalesce(descripcion_vision, '')), 'B') ||
-             setweight(to_tsvector('spanish', coalesce(categorias, '')), 'C')
+             setweight(to_tsvector('spanish', coalesce(categorias, '')), 'C') ||
+             setweight(to_tsvector('spanish', coalesce(variantes, '')), 'C')
            ) @@ to_tsquery('spanish', $2)
          ORDER BY created_at DESC, rank DESC
          LIMIT $1`,
@@ -677,11 +684,11 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
         );
 
         if (orMissingWords.length > 0) {
-          // Solo nombre y categorias, igual que en intento 1.
-          // descripcion_vision produce falsos positivos: un cardigan con descripción
-          // "combiná con un jean" aparece antes que los jeans reales.
+          // Incluye descripcion_vision para encontrar atributos ("tiro alto", "manga corta").
+          // Las palabras funcionales ya fueron filtradas por SEARCH_STOPWORDS, así que
+          // el riesgo de que "para" matchee todo el catálogo está eliminado.
           const orMissingConds = orMissingWords.map(
-            (_, i) => `(nombre ILIKE $${i + 2} OR categorias ILIKE $${i + 2})`
+            (_, i) => `(nombre ILIKE $${i + 2} OR descripcion_vision ILIKE $${i + 2} OR categorias ILIKE $${i + 2} OR variantes ILIKE $${i + 2})`
           );
           try {
             const orIlikeExtra = await query(
@@ -714,10 +721,12 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
     // campo devuelve el producto. Ordenado por match en el nombre (más probable).
     // Los talles detectados (L, M, XL, 1, 2, etc.) se buscan solo en variantes para evitar
     // falsos positivos con palabras cortas en nombre o descripción.
-    // NO se busca en descripcion_vision: palabras como "jean" aparecen en descripciones de
-    // otras prendas que "se combinan con jean", generando falsos positivos antes que los jeans reales.
+    // Se incluye descripcion_vision para encontrar atributos de prenda como "tiro alto",
+    // "manga corta", "cuello redondo" que viven en las descripciones, no en el nombre.
+    // Las palabras funcionales ("para", "usar", etc.) ya fueron filtradas por SEARCH_STOPWORDS
+    // antes de llegar acá, por lo que el riesgo de falsos positivos masivos está controlado.
     const wordConditions = words.length > 0
-      ? words.map((_, i) => `(nombre ILIKE $${i + 2} OR categorias ILIKE $${i + 2} OR variantes ILIKE $${i + 2})`)
+      ? words.map((_, i) => `(nombre ILIKE $${i + 2} OR descripcion_vision ILIKE $${i + 2} OR categorias ILIKE $${i + 2} OR variantes ILIKE $${i + 2})`)
       : [];
 
     const talleOffset = 2 + words.length;

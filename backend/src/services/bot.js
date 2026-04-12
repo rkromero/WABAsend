@@ -250,9 +250,9 @@ function formatProductsForPrompt(products) {
     const garmentCategory = detectGarmentCategory(p.nombre || '', p.categorias || '');
     const variantesNormalizadas = expandVariantes(p.variantes, garmentCategory);
 
-    // Para productos con talles/colores, mostrar los disponibles en lugar del número de stock
+    // Para productos con talles/colores, mostrar las opciones disponibles (pueden ser talles, colores o ambos)
     const disponibilidad = p.variantes
-      ? `Talles disponibles: ${variantesNormalizadas}`
+      ? `Opciones disponibles (talles/colores): ${variantesNormalizadas}`
       : `Stock: ${p.stock}`;
     const desc = p.descripcion_vision || p.nombre;
     const link = p.permalink ? ` | Link: ${p.permalink}` : '';
