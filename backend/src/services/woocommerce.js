@@ -236,7 +236,7 @@ function buildVisionPrompt(nombre, categorias, category, descripcionTexto) {
     atributosEspecificos = `
 - Tipo de manga: larga / corta / sin manga / 3/4 / globo / campana
 - Tipo de escote: V / redondo / cuadrado / halter / off-shoulder / polo / bote / asimétrico
-- Largo de la prenda: corto / a la cadera / largo / oversize
+- Largo de la prenda: crop (termina arriba de la cintura) / corto (hasta la cadera) / a la cadera / largo (cubre la cola y baja hasta el muslo o más, incluye tapados y abrigos largos) / maxi (llega a la rodilla o más abajo). Para tapados y abrigos: si la prenda baja hasta la mitad del muslo o más, usar "largo"
 - Ajuste al cuerpo: ajustado / suelto / entallado / oversize / crop
 - Tela o textura: punto / gasa / algodón / lino / tejido grueso / seda / satén / crochet
 - Detalles visuales: volados / botones / lazo / bordado / estampado / liso / flecos / encaje
