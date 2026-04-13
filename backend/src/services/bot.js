@@ -307,26 +307,43 @@ export async function generateBotResponse(userMessage, conversationHistory = [],
   // Detectar pedidos de combinación: "un jean para usar con esa campera" o
   // "me mostras un jean para combinar con X". La oración completa contamina
   // la búsqueda — el FTS encuentra "campera" y olvida el "jean" pedido.
-  // Extraemos solo el producto solicitado para usarlo como query de búsqueda.
+  // También detectar consultas de precio: "quiero el precio del trench",
+  // "cuánto sale el trench", etc. — el FTS falla porque requiere que el
+  // documento contenga "precio" Y "trench" al mismo tiempo.
+  // En todos los casos, extraemos solo el nombre del producto.
   if (!esCorto) {
-    // Patrón 1: "un/una X para usar/combinar/llevar con..."
-    const combinMatch = searchQuery.match(
-      /\bun[ao]?\s+([\w\s]{2,30}?)\s+para\s+(?:usar|combinar|llevar|ponerse|combinarlo|combinarla)\b/i
+    // Patrón 0: consultas de precio — "precio del/de la X", "cuánto sale/cuesta X"
+    const precioMatch = searchQuery.match(
+      /\bprecio\s+(?:del?\s+|de\s+(?:la\s+|los\s+|las\s+|un[ao]?\s+)?)([\w\s]{2,30}?)(?:\s*[?,.]|\s*$)/i
+    ) || searchQuery.match(
+      /\b(?:cuánto|cuanto)\s+(?:sale|cuesta|salen|cuestan|saldr[ií]a|costar[ií]a)\s+(?:el\s+|la\s+|los\s+|las\s+|un[ao]?\s+)?([\w\s]{2,30}?)(?:\s*[?,.]|\s*$)/i
     );
-    if (combinMatch) {
-      const producto = combinMatch[1].trim();
-      console.log(`[Bot] Pedido de combinación — buscando producto: "${producto}"`);
-      searchQuery = producto;
+    if (precioMatch) {
+      const producto = precioMatch[1].trim();
+      if (producto.split(/\s+/).length <= 4) {
+        console.log(`[Bot] Consulta de precio — buscando producto: "${producto}"`);
+        searchQuery = producto;
+      }
     } else {
-      // Patrón 2: "me mostras/mostrame un/una X" (sin el contexto de combinación)
-      const mostrameMatch = searchQuery.match(
-        /(?:me\s+mostras|mostras|mostrás|mostrame)\s+(?:un[ao]?\s+)?([\w\s]{2,30}?)(?:\s+para\b|$)/i
+      // Patrón 1: "un/una X para usar/combinar/llevar con..."
+      const combinMatch = searchQuery.match(
+        /\bun[ao]?\s+([\w\s]{2,30}?)\s+para\s+(?:usar|combinar|llevar|ponerse|combinarlo|combinarla)\b/i
       );
-      if (mostrameMatch) {
-        const producto = mostrameMatch[1].trim();
-        if (producto.split(/\s+/).length <= 4) { // Máx 4 palabras = producto real, no frase
-          console.log(`[Bot] Pedido directo — buscando producto: "${producto}"`);
-          searchQuery = producto;
+      if (combinMatch) {
+        const producto = combinMatch[1].trim();
+        console.log(`[Bot] Pedido de combinación — buscando producto: "${producto}"`);
+        searchQuery = producto;
+      } else {
+        // Patrón 2: "me mostras/mostrame un/una X" (sin el contexto de combinación)
+        const mostrameMatch = searchQuery.match(
+          /(?:me\s+mostras|mostras|mostrás|mostrame)\s+(?:un[ao]?\s+)?([\w\s]{2,30}?)(?:\s+para\b|$)/i
+        );
+        if (mostrameMatch) {
+          const producto = mostrameMatch[1].trim();
+          if (producto.split(/\s+/).length <= 4) { // Máx 4 palabras = producto real, no frase
+            console.log(`[Bot] Pedido directo — buscando producto: "${producto}"`);
+            searchQuery = producto;
+          }
         }
       }
     }

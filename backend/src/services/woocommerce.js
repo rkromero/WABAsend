@@ -523,6 +523,45 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
 
   const PRODUCT_FIELDS = `nombre, descripcion_vision, precio, precio_oferta, stock, variantes, categorias, permalink, imagen_url`;
 
+  // Palabras que NUNCA son nombres o atributos de productos.
+  // Se definen antes del Intento 1 para filtrar el mensaje antes de pasarlo al FTS.
+  // Sin este filtro, `plainto_tsquery('spanish', 'precio del trench')` genera una
+  // query AND que requiere "precio" en el tsvector del producto — ningún trench lo tiene.
+  // Lo mismo ocurre con "hay trench disponible?", "tienen trench en stock?", etc.
+  const SEARCH_STOPWORDS = new Set([
+    // Verbos funcionales
+    'para', 'usar', 'usarlo', 'usarla', 'mostras', 'mostrar', 'mostrame',
+    'quiero', 'podes', 'puedo', 'tenes', 'tiene', 'tienen', 'tienes',
+    'algo', 'otro', 'otra', 'este', 'esta', 'esos', 'esas', 'cual', 'como',
+    'desde', 'hasta', 'llevo', 'llevar', 'lleva', 'combina', 'combinar',
+    'combiná', 'combino', 'seria', 'tengo', 'busco', 'ponerse', 'ponme',
+    'ponerte', 'queres', 'querés', 'gustaria', 'gustaría', 'necesito',
+    'necesitas', 'buscas', 'buscás',
+    // Saludos / frases de cortesía
+    'hola', 'buenas', 'buen', 'bueno', 'buena', 'gracias', 'dale',
+    // Consultas de precio / disponibilidad — jamás son nombres de productos
+    'precio', 'precios', 'costo', 'costos', 'cuesta', 'cuestan',
+    'cuanto', 'cuánto', 'sale', 'salen', 'vale', 'valen',
+    'info', 'información', 'informacion', 'consulta', 'saber',
+    'disponible', 'disponibles', 'stock', 'modelo', 'modelos',
+    'opciones', 'opción', 'opcion', 'tipo', 'tipos', 'igual',
+    'similares', 'similar', 'alguno', 'algunas', 'algunos',
+    'talle', 'talles', // se buscan aparte por lógica de variantes
+  ]);
+
+  // Pre-filtrar el mensaje extrayendo solo las palabras con valor de producto.
+  // Esto evita que palabras conversacionales contaminen la query AND del FTS.
+  // Ej: "hay trench disponible?" → ftsQuery = "trench"
+  //     "quiero el precio del trench" → ftsQuery = "trench"
+  //     "campera tiro alto manga corta" → ftsQuery = "campera tiro alto manga corta" (sin cambios)
+  const ftsWords = mensaje
+    .toLowerCase()
+    .replace(/[^a-záéíóúüñ\s]/gi, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 3 && !SEARCH_STOPWORDS.has(w));
+
+  const ftsQuery = ftsWords.join(' ');
+
   try {
     // Intento 1: full-text search con diccionario español.
     // plainto_tsquery convierte el mensaje en una query de texto completo con AND implícito,
@@ -531,6 +570,9 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
     // categorias (peso C) y variantes (peso C). Incluir variantes es crítico para búsquedas por
     // color: un producto "TRENCH LARGO" con variantes "Beige, Chocolate, Visón" solo tiene el
     // color en ese campo, y sin él FTS no lo encontraría al buscar "trench beige".
+    // Se usa ftsQuery (mensaje filtrado) en lugar del mensaje completo para evitar que
+    // palabras como "precio" o "disponible" rompan la query AND.
+    if (ftsQuery.trim().length > 0) {
     const ftsResult = await query(
       `SELECT ${PRODUCT_FIELDS},
               ts_rank(
@@ -550,7 +592,7 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
          ) @@ plainto_tsquery('spanish', $2)
        ORDER BY created_at DESC, rank DESC
        LIMIT $1`,
-      [limit, mensaje]
+      [limit, ftsQuery]
     );
 
     if (ftsResult.rows.length > 0) {
@@ -559,14 +601,9 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
       // el FTS puede devolver camperas genéricas y nunca encontrar "Chaqueta Greek".
       // Solución: si hay palabras del query que no aparecen en ningún nombre de resultado,
       // buscarlas por ILIKE y mergear — son palabras específicas que el FTS ignoró.
-      const queryWords = mensaje
-        .toLowerCase()
-        .replace(/[^a-záéíóúüñ\s]/gi, ' ')
-        .split(/\s+/)
-        .filter((w) => w.length > 3);
-
+      // Usamos ftsWords (ya filtradas por SEARCH_STOPWORDS) para evitar falsos positivos.
       const resultNamesLower = ftsResult.rows.map((r) => (r.nombre || '').toLowerCase());
-      const missingWords = queryWords.filter(
+      const missingWords = ftsWords.filter(
         (w) => !resultNamesLower.some((name) => name.includes(w))
       );
 
@@ -603,25 +640,11 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
 
       return ftsResult.rows;
     }
+    } // fin if (ftsQuery.trim().length > 0)
 
-    // Palabras funcionales españolas que no son identificadores de productos.
-    // Buscarlas por ILIKE genera falsos positivos masivos: "para" aparece en la
-    // descripción de prácticamente TODOS los productos ("ideal para...", "perfecta para..."),
-    // "usar" en muchas también, con lo que el ILIKE devuelve los 6 más nuevos al azar.
-    const SEARCH_STOPWORDS = new Set([
-      'para', 'usar', 'usarlo', 'usarla', 'mostras', 'mostrar', 'mostrame',
-      'quiero', 'podes', 'puedo', 'tenes', 'tiene', 'algo', 'otro', 'otra',
-      'este', 'esta', 'esos', 'esas', 'cual', 'como', 'desde', 'hasta',
-      'llevo', 'llevar', 'lleva', 'combina', 'combinar', 'combiná', 'combino',
-      'seria', 'tengo', 'busco', 'ponerse', 'ponme', 'ponerte',
-    ]);
-
-    // Extraer palabras de búsqueda útiles (> 3 chars, sin puntuación, sin funcionales)
-    const words = mensaje
-      .toLowerCase()
-      .replace(/[^a-záéíóúüñ\s]/gi, ' ')
-      .split(/\s+/)
-      .filter((w) => w.length > 3 && !SEARCH_STOPWORDS.has(w));
+    // ftsWords ya contiene las palabras filtradas por SEARCH_STOPWORDS (calculadas arriba).
+    // Las reutilizamos como `words` para los intentos 2 y 3.
+    const words = ftsWords;
 
     // Extraer talles/tallas del mensaje original — pueden ser 1-2 chars (L, M, XL, XS, S, 42, etc.)
     // y quedan filtrados por el criterio de longitud anterior.
