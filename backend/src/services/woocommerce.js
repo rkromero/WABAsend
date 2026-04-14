@@ -551,6 +551,16 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
     'opciones', 'opción', 'opcion', 'tipo', 'tipos', 'igual',
     'similares', 'similar', 'alguno', 'algunas', 'algunos',
     'talle', 'talles', // se buscan aparte por lógica de variantes
+    // Términos de pago y financieros — jamás son nombres de productos.
+    // Sin esto, "El trench, precio y forma de pago" genera ftsQuery="trench forma pago",
+    // y el AND del FTS falla porque ningún producto tiene esas tres palabras juntas.
+    'forma', 'formas', 'pago', 'pagos', 'efectivo', 'transferencia', 'transferencias',
+    'tarjeta', 'tarjetas', 'debito', 'débito', 'credito', 'crédito',
+    'mercado', 'cuota', 'cuotas', 'banco', 'bancos', 'billetera', 'billeteras',
+    // Palabras de consulta genérica adicionales
+    'favor', 'porfavor', 'tanto', 'mucho', 'muchos', 'mucha', 'muchas',
+    'poco', 'poca', 'nada', 'todo', 'toda', 'todos', 'todas',
+    'queda', 'quedan', 'viene', 'vienen', 'seria', 'serían',
   ]);
 
   // Pre-filtrar el mensaje extrayendo solo las palabras con valor de producto.

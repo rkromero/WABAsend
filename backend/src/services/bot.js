@@ -312,6 +312,22 @@ export async function generateBotResponse(userMessage, conversationHistory = [],
   // documento contenga "precio" Y "trench" al mismo tiempo.
   // En todos los casos, extraemos solo el nombre del producto.
   if (!esCorto) {
+    // Patrón -1: producto AL INICIO del mensaje seguido de consulta de precio/pago.
+    // Captura el caso típico: "El trench, precio y forma de pago" o "La campera, precio?".
+    // El cliente nombra el producto primero y luego pregunta precio/pago — el precioMatch
+    // no lo captura porque busca "precio del X" (precio antes del producto).
+    const productoPrimeroMatch = searchQuery.match(
+      /^(?:el\s+|la\s+|los\s+|las\s+|un[ao]?\s+)?([\w]+(?:\s+[\w]+){0,3}?)\s*[,.].*\b(?:precio|pago|pagos|costo|cuesta|vale|cuánto|cuanto|forma(?:\s+de\s+pago)?)\b/i
+    );
+    if (productoPrimeroMatch) {
+      const producto = productoPrimeroMatch[1].trim();
+      // Guardia: máx 4 palabras y mínimo 3 chars — evita capturar frases largas
+      if (producto.split(/\s+/).length <= 4 && producto.length >= 3) {
+        console.log(`[Bot] Producto + consulta precio/pago — buscando: "${producto}"`);
+        searchQuery = producto;
+      }
+    }
+
     // Patrón 0: consultas de precio — "precio del/de la X", "cuánto sale/cuesta X"
     const precioMatch = searchQuery.match(
       /\bprecio\s+(?:del?\s+|de\s+(?:la\s+|los\s+|las\s+|un[ao]?\s+)?)([\w\s]{2,30}?)(?:\s*[?,.]|\s*$)/i
@@ -431,7 +447,9 @@ export async function generateBotResponse(userMessage, conversationHistory = [],
   const behaviorRules = `\n\nREGLAS DE COMPORTAMIENTO:
 1. POLÍTICA DE CAMBIOS: Cuando una clienta duda si le va a quedar bien, pregunta por un talle que no está disponible, o menciona que no sabe qué talle elegir — siempre aclará que "todos los pedidos tienen cambio". No esperes a que lo pregunten: mencionarlo en ese momento convierte dudas en ventas.
 2. MENSAJES CONFUSOS: Si recibís un mensaje que no entendés bien (dictado de voz mal transcripto, frase incompleta, contexto poco claro), NUNCA respondas con "comunicate con nuestro equipo" ni cerrés la conversación. En cambio, preguntá con amabilidad: "No entendí bien tu consulta, ¿me podés decir qué prenda te interesa?"
-3. NUNCA derivés a "nuestro equipo" como respuesta a una duda de producto — esas consultas las resolvés vos. Solo derivar si es algo administrativo (cambio ya enviado, problema con un pago, etc.).`;
+3. NUNCA derivés a "nuestro equipo" como respuesta a una duda de producto — esas consultas las resolvés vos. Solo derivar si es algo administrativo (cambio ya enviado, problema con un pago, etc.).
+4. PRODUCTO NO ENCONTRADO EN EL CATÁLOGO: Si la clienta pregunta por un producto específico (ej: "el trench", "la campera greek") y ese producto NO aparece en la lista de PRODUCTOS DISPONIBLES EN STOCK que se te proporcionó, NUNCA digas "no tenemos" ni "no hay" de forma definitiva. En su lugar decí algo como: "No lo encuentro en el catálogo que tengo en este momento, pero puede ser que tenga otro nombre — ¿te referís a una [descripción del tipo de prenda]? También podés escribirnos por acá y te consultamos." No ofrezcas productos alternativos sin antes confirmar que realmente no hay lo que pide.
+5. PRECIO Y FORMA DE PAGO: Cuando la clienta pregunta precio Y forma de pago de un producto en el mismo mensaje, respondé SIEMPRE: primero el precio del producto que pidió (con oferta si tiene), luego las formas de pago disponibles. Si el producto está en tu lista, mostrá precio y variantes disponibles.`;
 
   // Contexto de campaña: si la persona está respondiendo a un mensaje saliente,
   // le indicamos al bot de qué trataba ese mensaje para que responda en esa línea.
