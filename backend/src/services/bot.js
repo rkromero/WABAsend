@@ -344,6 +344,25 @@ export async function generateBotResponse(userMessage, conversationHistory = [],
             console.log(`[Bot] Pedido directo — buscando producto: "${producto}"`);
             searchQuery = producto;
           }
+        } else {
+          // Patrón 3: referencias indirectas — "X creo que se llaman", "lo que están ofreciendo X",
+          // "se llaman X", "venden X creo". El usuario nombra el producto en forma conversacional.
+          const referenciaMatch = searchQuery.match(
+            /\b([\w]+(?:\s+[\w]+){0,3}?)\s+creo\s+que\s+se\s+llaman?\b/i
+          ) || searchQuery.match(
+            /\bse\s+llaman?\s+([\w]+(?:\s+[\w]+){0,3})\b/i
+          ) || searchQuery.match(
+            /\bofreciendo\s+([\w]+(?:\s+[\w]+){0,3})\b/i
+          ) || searchQuery.match(
+            /\bofrecen\s+([\w]+(?:\s+[\w]+){0,3})\b/i
+          );
+          if (referenciaMatch) {
+            const producto = referenciaMatch[1].trim();
+            if (producto.split(/\s+/).length <= 4) {
+              console.log(`[Bot] Referencia indirecta — buscando producto: "${producto}"`);
+              searchQuery = producto;
+            }
+          }
         }
       }
     }

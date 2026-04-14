@@ -537,6 +537,10 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
     'combiná', 'combino', 'seria', 'tengo', 'busco', 'ponerse', 'ponme',
     'ponerte', 'queres', 'querés', 'gustaria', 'gustaría', 'necesito',
     'necesitas', 'buscas', 'buscás',
+    // Verbos conversacionales frecuentes — "están ofreciendo", "creo que", "se llaman"
+    'están', 'estan', 'ofrecen', 'ofreciendo', 'ofrecen', 'llaman', 'llama',
+    'creo', 'dicen', 'venden', 'vendiendo', 'tienen', 'traen', 'trajeron',
+    'llegaron', 'llegó', 'llego', 'serán', 'seran', 'serían', 'serian',
     // Saludos / frases de cortesía
     'hola', 'buenas', 'buen', 'bueno', 'buena', 'gracias', 'dale',
     // Consultas de precio / disponibilidad — jamás son nombres de productos
@@ -554,11 +558,21 @@ export async function searchRelevantProducts(mensaje, limit = 6) {
   // Ej: "hay trench disponible?" → ftsQuery = "trench"
   //     "quiero el precio del trench" → ftsQuery = "trench"
   //     "campera tiro alto manga corta" → ftsQuery = "campera tiro alto manga corta" (sin cambios)
+  // deduplicarCaracteres: "treench" → "trench", "camperra" → "campera".
+  // Normaliza typos de caracteres repetidos para mejorar el match en ILIKE.
+  const deduplicarCaracteres = (w) => w.replace(/(.)\1+/g, '$1');
+
   const ftsWords = mensaje
     .toLowerCase()
     .replace(/[^a-záéíóúüñ\s]/gi, ' ')
     .split(/\s+/)
-    .filter((w) => w.length > 3 && !SEARCH_STOPWORDS.has(w));
+    .filter((w) => w.length > 3 && !SEARCH_STOPWORDS.has(w))
+    .map((w) => {
+      const dedup = deduplicarCaracteres(w);
+      // Si la deduplicación cambia la palabra, devolver la versión corregida.
+      // No aplicar si la original es una palabra válida más larga (ej: "llevo" no cambia).
+      return dedup !== w && dedup.length > 3 ? dedup : w;
+    });
 
   const ftsQuery = ftsWords.join(' ');
 
