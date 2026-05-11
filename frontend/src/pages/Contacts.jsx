@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, Search, Trash2, Upload, ChevronLeft, ChevronRight, Tag, Edit2, Check, X, AlertTriangle, Wand2, History, MessageSquare, Megaphone, Zap, ArrowDownLeft, Loader2, Download } from 'lucide-react';
+import { Users, Search, Trash2, Upload, ChevronLeft, ChevronRight, Tag, Edit2, Check, X, AlertTriangle, Wand2, History, MessageSquare, Megaphone, Zap, ArrowDownLeft, Loader2, Download, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { format, formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -19,6 +19,8 @@ export default function Contacts() {
   const [deleting, setDeleting]         = useState(null);
   const [normalizing, setNormalizing]   = useState(false);
   const [exporting, setExporting]       = useState(false);
+  const [bulkDeleteTarget, setBulkDeleteTarget] = useState(null); // {segmento, total} | null
+  const [bulkDeleting, setBulkDeleting]         = useState(false);
   const [editingPhone, setEditingPhone] = useState(null); // id del contacto en edición
   const [phoneValue, setPhoneValue]     = useState('');
   const [savingPhone, setSavingPhone]   = useState(false);
@@ -150,6 +152,28 @@ export default function Contacts() {
       toast.error(err.message);
     } finally {
       setDeleting(null);
+    }
+  }
+
+  async function handleBulkDeleteSegment() {
+    if (!bulkDeleteTarget) return;
+    setBulkDeleting(true);
+    try {
+      const r = await api.delete('/contacts/by-segment', { params: { segmento: bulkDeleteTarget.segmento } });
+      const count = r.data?.data?.deleted ?? 0;
+      toast.success(`${count} contacto${count !== 1 ? 's' : ''} eliminado${count !== 1 ? 's' : ''} del segmento "${bulkDeleteTarget.segmento}"`);
+      setBulkDeleteTarget(null);
+      // Si el segmento activo era el que se borró, resetear filtro
+      if (segmento === bulkDeleteTarget.segmento) setSegmento('');
+      // Refrescar lista y segmentos
+      await Promise.all([
+        fetchContacts(),
+        api.get('/contacts/segments').then((res) => setSegments(res.data || [])).catch(() => {}),
+      ]);
+    } catch (err) {
+      toast.error(err.message || 'Error al eliminar el segmento');
+    } finally {
+      setBulkDeleting(false);
     }
   }
 
@@ -287,19 +311,31 @@ export default function Contacts() {
             const color = SEGMENT_COLORS[idx % SEGMENT_COLORS.length];
             const isActive = segmento === s.segmento;
             return (
-              <button
-                key={s.segmento}
-                onClick={() => handleSegmento(s.segmento)}
-                className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border transition-all ${
-                  isActive
-                    ? color
-                    : 'border-base-border text-gray-500 hover:border-white/20 hover:text-gray-300'
-                }`}
-              >
-                <Tag size={10} />
-                {s.segmento}
-                <span className="opacity-60">({s.total})</span>
-              </button>
+              <div key={s.segmento} className="flex items-center group/seg">
+                <button
+                  onClick={() => handleSegmento(s.segmento)}
+                  className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-l-full border-y border-l transition-all ${
+                    isActive
+                      ? color
+                      : 'border-base-border text-gray-500 hover:border-white/20 hover:text-gray-300'
+                  }`}
+                >
+                  <Tag size={10} />
+                  {s.segmento}
+                  <span className="opacity-60">({s.total})</span>
+                </button>
+                <button
+                  onClick={() => setBulkDeleteTarget(s)}
+                  title={`Eliminar todos los contactos de "${s.segmento}"`}
+                  className={`flex items-center px-1.5 py-1.5 rounded-r-full border-y border-r transition-all opacity-0 group-hover/seg:opacity-100 ${
+                    isActive
+                      ? `${color} hover:text-red-400`
+                      : 'border-base-border text-gray-600 hover:text-red-400 hover:border-red-400/30'
+                  }`}
+                >
+                  <Trash2 size={9} />
+                </button>
+              </div>
             );
           })}
         </div>
@@ -474,6 +510,71 @@ export default function Contacts() {
           </>
         )}
       </div>
+      {/* Modal eliminación masiva por segmento */}
+      {bulkDeleteTarget && (
+        <>
+          <div className="fixed inset-0 bg-black/60 z-40" onClick={() => !bulkDeleting && setBulkDeleteTarget(null)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="glass-card w-full max-w-sm p-6 space-y-5 animate-slide-up">
+              {/* Ícono de advertencia */}
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-red-400/10 border border-red-400/20">
+                  <AlertCircle size={20} className="text-red-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white">Eliminar segmento</p>
+                  <p className="text-xs text-gray-500 mt-0.5">Esta acción no se puede deshacer</p>
+                </div>
+              </div>
+
+              {/* Detalle */}
+              <div className="bg-white/[0.04] border border-base-border rounded-xl px-4 py-3 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-500">Segmento</span>
+                  <span className="text-xs font-medium text-white">{bulkDeleteTarget.segmento}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-500">Contactos a eliminar</span>
+                  <span className="text-xs font-semibold text-red-400">{Number(bulkDeleteTarget.total).toLocaleString()}</span>
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-400">
+                Se eliminarán permanentemente todos los contactos del segmento <span className="text-white font-medium">"{bulkDeleteTarget.segmento}"</span>. Los mensajes enviados y el historial de campañas no se verán afectados.
+              </p>
+
+              {/* Acciones */}
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => setBulkDeleteTarget(null)}
+                  disabled={bulkDeleting}
+                  className="btn-secondary flex-1"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleBulkDeleteSegment}
+                  disabled={bulkDeleting}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-red-500/20 border border-red-500/30 text-red-400 hover:bg-red-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {bulkDeleting ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      Eliminando...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={13} />
+                      Eliminar {Number(bulkDeleteTarget.total).toLocaleString()} contacto{Number(bulkDeleteTarget.total) !== 1 ? 's' : ''}
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* Drawer historial por contacto */}
       {historyContact && (
         <>

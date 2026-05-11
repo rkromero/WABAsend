@@ -275,6 +275,19 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// DELETE /api/contacts/by-segment?segmento=X — eliminar todos los contactos de un segmento
+router.delete('/by-segment', async (req, res) => {
+  const segmento = req.query.segmento ? String(req.query.segmento).trim() : '';
+  if (!segmento) return res.status(400).json({ success: false, error: 'Parámetro "segmento" requerido' });
+  try {
+    const result = await query('DELETE FROM waba_contacts WHERE segmento = $1 RETURNING id', [segmento]);
+    res.json({ success: true, data: { deleted: result.rowCount, segmento } });
+  } catch (err) {
+    console.error('[Contacts] DELETE by-segment error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // DELETE /api/contacts/:id
 router.delete('/:id', async (req, res) => {
   const id = parseInt(req.params.id);
