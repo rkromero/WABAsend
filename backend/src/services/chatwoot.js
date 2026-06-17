@@ -138,6 +138,54 @@ export async function sendMessageToConversation(conversationId, message, message
 }
 
 /**
+ * Envía un mensaje con un archivo ADJUNTO a una conversación de Chatwoot.
+ *
+ * Usa multipart/form-data con el campo `attachments[]` que espera la API de Chatwoot.
+ * Chatwoot almacena el archivo y luego lo expone vía `data_url`, que es lo que el
+ * frontend (AttachmentRenderer) renderiza como imagen/video/audio/documento.
+ *
+ * ⚠️ No reutilizamos `chatwootClient` porque su header fijo `Content-Type: application/json`
+ *    rompería el multipart. Hacemos una llamada axios directa: al pasar un FormData nativo,
+ *    axios calcula automáticamente el boundary correcto.
+ *
+ * @param {number} conversationId - ID de la conversación
+ * @param {Buffer} buffer         - Contenido binario del archivo
+ * @param {string} filename       - Nombre del archivo (ej: 'foto.jpg')
+ * @param {string} mimeType       - MIME type (ej: 'image/jpeg')
+ * @param {string} messageType    - 'incoming' (del cliente) o 'outgoing' (del agente)
+ * @param {string} caption        - Texto opcional que acompaña al adjunto
+ * @returns {Promise<Object>} Mensaje creado en Chatwoot
+ */
+export async function sendAttachmentToConversation(
+  conversationId,
+  buffer,
+  filename,
+  mimeType,
+  messageType = 'incoming',
+  caption = ''
+) {
+  // FormData y Blob son globales en Node.js 18+ (mismo patrón que uploadMediaToMeta)
+  const formData = new FormData();
+  if (caption) formData.append('content', caption);
+  formData.append('message_type', messageType);
+  formData.append('private', 'false');
+  formData.append('attachments[]', new Blob([buffer], { type: mimeType }), filename);
+
+  try {
+    const res = await axios.post(
+      `${CHATWOOT_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`,
+      formData,
+      { headers: { api_access_token: CHATWOOT_TOKEN }, timeout: 30000 }
+    );
+    console.debug(`[Chatwoot] Adjunto enviado a conversación ${conversationId} (${filename})`);
+    return res.data;
+  } catch (err) {
+    console.error('[Chatwoot] Error en sendAttachmentToConversation:', err.response?.data || err.message);
+    throw err;
+  }
+}
+
+/**
  * Lista las conversaciones del account con paginación.
  *
  * @param {number} page - Número de página (default: 1)

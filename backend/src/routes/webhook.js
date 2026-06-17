@@ -16,6 +16,7 @@ import {
   getOrCreateContact,
   getOrCreateConversation,
   sendMessageToConversation,
+  sendAttachmentToConversation,
 } from '../services/chatwoot.js';
 import { shouldBotRespond, generateBotResponse, sanitizeBotResponse } from '../services/bot.js';
 import { sendFreeTextMessage, getMediaUrl, downloadMediaBuffer, transcribeAudio } from '../services/whatsapp.js';
@@ -295,6 +296,37 @@ const MEDIA_LABELS = {
   audio: 'Audio',
 };
 
+/** MIME por defecto cuando Meta no lo informa, por tipo de media */
+const DEFAULT_MIME = {
+  image: 'image/jpeg',
+  video: 'video/mp4',
+  audio: 'audio/ogg',
+  document: 'application/octet-stream',
+};
+
+/**
+ * Deriva una extensión de archivo a partir del MIME type.
+ * Se usa para nombrar el adjunto cuando WhatsApp no envía un filename (imágenes/videos).
+ *
+ * @param {string} mime - MIME type (ej: 'image/jpeg')
+ * @returns {string} extensión sin punto (ej: 'jpg')
+ */
+function extFromMime(mime = '') {
+  const m = mime.toLowerCase();
+  if (m.includes('jpeg') || m.includes('jpg')) return 'jpg';
+  if (m.includes('png'))  return 'png';
+  if (m.includes('webp')) return 'webp';
+  if (m.includes('gif'))  return 'gif';
+  if (m.includes('mp4'))  return 'mp4';
+  if (m.includes('3gpp')) return '3gp';
+  if (m.includes('ogg'))  return 'ogg';
+  if (m.includes('mpeg')) return 'mp3';
+  if (m.includes('pdf'))  return 'pdf';
+  // Último recurso: lo que esté después de la barra del MIME (ej: 'image/x-foo' → 'x-foo')
+  const after = m.split('/')[1];
+  return after ? after.split(';')[0] : 'bin';
+}
+
 /**
  * Procesa un mensaje multimedia entrante (imagen, video, documento, audio).
  * Obtiene la URL temporal del archivo desde Meta, guarda en DB y sincroniza
@@ -315,6 +347,7 @@ async function processIncomingMedia({ telefono, nombre, waMessageId, msg }) {
   const mediaId   = mediaData.id;
   const caption   = mediaData.caption || '';
   const filename  = mediaData.filename || '';
+  const mediaMime = mediaData.mime_type || DEFAULT_MIME[mediaType] || 'application/octet-stream';
 
   // Intentar obtener la URL temporal de descarga desde Meta
   let mediaUrl = null;
@@ -326,32 +359,52 @@ async function processIncomingMedia({ telefono, nombre, waMessageId, msg }) {
     }
   }
 
-  // ⚠️ Para audio: descargar el buffer INMEDIATAMENTE antes de que la URL expire.
-  // Meta expira los enlaces de descarga en ~5 minutos. Las operaciones de Chatwoot y DB
-  // que siguen pueden demorar, así que descargamos ahora mientras la URL es fresca.
-  let audioBuffer = null;
-  if (mediaType === 'audio' && mediaUrl) {
+  // ⚠️ Descargar el binario INMEDIATAMENTE antes de que la URL expire (~5 min en Meta).
+  // Lo necesitamos para dos cosas: adjuntar el archivo en Chatwoot (imagen/video/documento)
+  // y transcribir el audio con Whisper. Las llamadas a Chatwoot/DB que siguen pueden demorar,
+  // así que bajamos el archivo ahora, mientras la URL es fresca.
+  let mediaBuffer = null;
+  if (mediaUrl) {
     try {
-      audioBuffer = await downloadMediaBuffer(mediaUrl);
-      console.log(`[Webhook] Buffer de audio descargado — ${audioBuffer.length} bytes de ${telefono}`);
+      mediaBuffer = await downloadMediaBuffer(mediaUrl);
+      console.log(`[Webhook] Buffer de media descargado — ${mediaBuffer.length} bytes (${mediaType}) de ${telefono}`);
     } catch (err) {
-      console.warn(`[Webhook] No se pudo descargar buffer de audio para ${telefono}:`, err.message);
+      console.warn(`[Webhook] No se pudo descargar buffer de media para ${telefono}:`, err.message);
     }
   }
+  // El flujo de audio (transcripción Whisper) más abajo sigue usando audioBuffer.
+  const audioBuffer = mediaType === 'audio' ? mediaBuffer : null;
 
-  // Texto descriptivo para Chatwoot y trazabilidad
+  // Texto descriptivo para trazabilidad y como fallback si el adjunto falla
   const label = MEDIA_LABELS[mediaType] || mediaType;
   let messageText = caption ? `[${label}] ${caption}` : `[${label} recibido]`;
   if (filename) messageText += ` — ${filename}`;
 
-  // Sincronizar con Chatwoot (como mensaje de texto descriptivo)
+  // Sincronizar con Chatwoot
   let chatwootConversationId = null;
   try {
     const contact      = await getOrCreateContact(telefono, nombre);
     const conversation = await getOrCreateConversation(contact.id);
     chatwootConversationId = conversation.id;
-    await sendMessageToConversation(conversation.id, messageText, 'incoming');
-    console.log(`[Webhook] Media entrante de ${telefono} (${mediaType}) sincronizado con Chatwoot`);
+
+    // Imagen / video / documento → subir como ADJUNTO real para que se vea en la bandeja.
+    // (El frontend renderiza attachment.data_url; un mensaje de solo texto no muestra nada.)
+    // Audio → se mantiene como texto; la transcripción se envía aparte en el bloque del bot.
+    const isAttachable = ['image', 'video', 'document'].includes(mediaType);
+    if (isAttachable && mediaBuffer) {
+      const safeName = filename || `${mediaType}_${waMessageId || Date.now()}.${extFromMime(mediaMime)}`;
+      try {
+        await sendAttachmentToConversation(conversation.id, mediaBuffer, safeName, mediaMime, 'incoming', caption);
+        console.log(`[Webhook] Media entrante de ${telefono} (${mediaType}) adjuntado en Chatwoot`);
+      } catch (attErr) {
+        // Si la subida del adjunto falla, dejamos al menos el texto descriptivo
+        console.warn('[Webhook] No se pudo adjuntar media en Chatwoot, usando texto:', attErr.response?.data || attErr.message);
+        await sendMessageToConversation(conversation.id, messageText, 'incoming');
+      }
+    } else {
+      await sendMessageToConversation(conversation.id, messageText, 'incoming');
+      console.log(`[Webhook] Media entrante de ${telefono} (${mediaType}) sincronizado con Chatwoot`);
+    }
 
     // Auto-etiquetado para imágenes/documentos con caption — fire-and-forget
     if (caption) autoTagConversation(chatwootConversationId, caption).catch(() => {});
