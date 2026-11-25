@@ -152,6 +152,8 @@ const VENDEDOR_ALLOWED = [
   { method: 'DELETE', re: /^\/inbox\/conversations\/\d+\/tags\/[^/]+$/ },
   { method: 'GET', re: /^\/inbox\/(tags|quick-replies|templates)$/ },
   { method: 'GET', re: /^\/products\/?$/ },
+  { method: 'GET', re: /^\/push\/public-key$/ },
+  { method: 'POST', re: /^\/push\/(subscribe|unsubscribe)$/ },
 ];
 
 /** Se monta en /api — req.path es relativo (ej: /inbox/conversations). */

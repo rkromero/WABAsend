@@ -33,6 +33,8 @@ import analyticsRouter from './routes/analytics.js';
 import viccaJourneyRouter from './routes/viccaJourney.js';
 import authRouter from './routes/auth.js';
 import { initAuth, requireAuth, enforceRole } from './services/auth.js';
+import { initPush } from './services/push.js';
+import pushRouter from './routes/push.js';
 
 dotenv.config();
 
@@ -108,6 +110,7 @@ app.use('/api/automations', automationsRouter);
 app.use('/api/knowledge', knowledgeRouter);
 app.use('/api/optouts', optoutsRouter);
 app.use('/api/analytics', analyticsRouter);
+app.use('/api/push', pushRouter);
 
 // --- Manejo global de errores ---
 app.use((err, req, res, _next) => {
@@ -122,6 +125,7 @@ async function start() {
   try {
     await initSchema();
     await initAuth();
+    await initPush().catch((err) => console.error('[Server] Push no disponible:', err.message));
     console.log('[Server] Base de datos lista');
   } catch (err) {
     console.error('[Server] Error al inicializar la base de datos:', err.message);

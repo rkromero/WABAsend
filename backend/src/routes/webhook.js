@@ -23,6 +23,7 @@ import { sendFreeTextMessage, getMediaUrl, downloadMediaBuffer, transcribeAudio 
 import { getConversationHistory, saveConversationTurn } from '../services/conversationMemory.js';
 import { autoTagConversation } from '../services/autoTagger.js';
 import { toM4a } from '../services/audio.js';
+import { notifyIncomingMessage } from '../services/push.js';
 import { scheduleDebounce } from '../services/messageDebounce.js';
 
 const router = Router();
@@ -162,6 +163,7 @@ async function processIncomingMessage({ telefono, nombre, messageText, waMessage
 
     await sendMessageToConversation(conversation.id, messageText, 'incoming');
     console.log(`[Webhook] Mensaje entrante de ${telefono} sincronizado con Chatwoot (conv: ${conversation.id})`);
+    notifyIncomingMessage({ nombre, telefono, texto: messageText, conversationId: conversation.id });
 
     // Auto-etiquetado en background — fire-and-forget, nunca bloquea el webhook
     autoTagConversation(chatwootConversationId, messageText).catch(() => {});
@@ -418,6 +420,9 @@ async function processIncomingMedia({ telefono, nombre, waMessageId, msg }) {
       await sendMessageToConversation(conversation.id, messageText, 'incoming');
       console.log(`[Webhook] Media entrante de ${telefono} (${mediaType}) sincronizado con Chatwoot`);
     }
+
+    const pushLabel = { image: '📷 Foto', video: '🎥 Video', audio: '🎤 Audio', document: '📄 Documento' }[mediaType] || '📎 Archivo';
+    notifyIncomingMessage({ nombre, telefono, texto: caption ? `${pushLabel}: ${caption}` : pushLabel, conversationId: chatwootConversationId });
 
     // Auto-etiquetado para imágenes/documentos con caption — fire-and-forget
     if (caption) autoTagConversation(chatwootConversationId, caption).catch(() => {});

@@ -73,6 +73,51 @@ export async function enableNotifications() {
   return Notification.requestPermission();
 }
 
+// ── Web Push ────────────────────────────────────────────────────────────────
+
+function base64ToUint8(b64) {
+  const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+
+export function pushSupported() {
+  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+
+/**
+ * Suscribe este dispositivo a las notificaciones push y lo registra en el servidor.
+ * Se llama en cada apertura (si hay permiso) para mantener la suscripción al día.
+ * @param {import('axios').AxiosInstance} api
+ */
+export async function ensurePushSubscription(api) {
+  if (!pushSupported() || Notification.permission !== 'granted') return false;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      const res = await api.get('/push/public-key');
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: base64ToUint8(res.data.publicKey),
+      });
+    }
+    await api.post('/push/subscribe', sub.toJSON());
+    return true;
+  } catch (err) {
+    console.warn('[Push] No se pudo suscribir:', err?.message);
+    return false;
+  }
+}
+
+/** Pide permiso (requiere un toque del usuario) y suscribe */
+export async function requestPushPermission(api) {
+  if (!pushSupported()) return 'unsupported';
+  const result = await Notification.requestPermission();
+  if (result === 'granted') await ensurePushSubscription(api);
+  return result;
+}
+
 /** Notificación del sistema (solo si la app está en segundo plano y hay permiso) */
 export async function showLocalNotification(title, body, url = '/') {
   if (!('Notification' in window) || Notification.permission !== 'granted' || !document.hidden) return;

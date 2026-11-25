@@ -17,6 +17,10 @@ import {
   LogOut,
 } from 'lucide-react';
 import { logout, getStoredUser } from '../lib/auth.js';
+import { pushSupported, requestPushPermission } from '../lib/pwa.js';
+import api from '../lib/api.js';
+import toast from 'react-hot-toast';
+import { Bell, BellOff } from 'lucide-react';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -32,6 +36,37 @@ const navItems = [
   { to: '/users', icon: UserCog, label: 'Usuarios' },
   { to: '/settings', icon: Settings, label: 'Configuración' },
 ];
+
+function NotifButton() {
+  const [perm, setPerm] = React.useState(() => (pushSupported() ? Notification.permission : 'unsupported'));
+  if (perm === 'unsupported') return null;
+  if (perm === 'granted') {
+    return (
+      <span className="flex items-center gap-2 text-xs text-accent">
+        <Bell size={14} /> Notificaciones activas
+      </span>
+    );
+  }
+  if (perm === 'denied') {
+    return (
+      <span className="flex items-center gap-2 text-xs text-red-400" title="Permitilas desde el candado de la barra de direcciones">
+        <BellOff size={14} /> Notificaciones bloqueadas
+      </span>
+    );
+  }
+  return (
+    <button
+      onClick={async () => {
+        const r = await requestPushPermission(api);
+        setPerm(r);
+        if (r === 'granted') toast.success('Notificaciones activadas');
+      }}
+      className="w-full flex items-center gap-2 text-xs text-gray-300 hover:text-white transition-colors"
+    >
+      <Bell size={14} /> Activar notificaciones
+    </button>
+  );
+}
 
 export default function Sidebar() {
   return (
@@ -78,6 +113,7 @@ export default function Sidebar() {
           <div className="w-2 h-2 rounded-full bg-accent animate-pulse-subtle" />
           <span className="text-xs text-gray-500">Sistema activo</span>
         </div>
+        <NotifButton />
         <button
           onClick={logout}
           className="w-full flex items-center gap-2 text-xs text-gray-500 hover:text-gray-200 transition-colors"

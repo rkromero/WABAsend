@@ -3,9 +3,9 @@
  */
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, ArrowLeft, MoreVertical, LogOut, MessageCircle, Camera, FileText, Mic, Video, Download, Bell, Share, X } from 'lucide-react';
-import toast from 'react-hot-toast';
-import { useInstallState, promptInstall, notificationsState, enableNotifications } from '../lib/pwa.js';
+import { Search, ArrowLeft, MoreVertical, LogOut, MessageCircle, Camera, FileText, Mic, Video, Download, Share, X } from 'lucide-react';
+import { useInstallState, promptInstall } from '../lib/pwa.js';
+import NotificationBanner from './NotificationBanner.jsx';
 import { logout } from '../lib/auth.js';
 import { Avatar, Ticks, BottomNav, Spinner } from './ui.jsx';
 import { contactOf, listTime, isOutgoing } from './waUtils.js';
@@ -112,7 +112,6 @@ export default function ChatList({ conversations, loading, error, tags, user, un
   const [menuOpen, setMenuOpen] = useState(false);
   const searchRef = useRef(null);
   const installState = useInstallState();
-  const [notifState, setNotifState] = useState(notificationsState);
 
   useEffect(() => { if (searching) searchRef.current?.focus(); }, [searching]);
 
@@ -191,6 +190,7 @@ export default function ChatList({ conversations, loading, error, tags, user, un
         {loading ? (
           <div className="flex justify-center pt-16"><Spinner /></div>
         ) : null}
+        {!loading && <NotificationBanner />}
         {!loading && <InstallBanner />}
         {loading ? null : visible.length === 0 ? (
           <div className="flex flex-col items-center text-center px-10 pt-20 text-wa-sub">
@@ -225,19 +225,6 @@ export default function ChatList({ conversations, loading, error, tags, user, un
             {installState === 'prompt' && (
               <button onClick={() => { setMenuOpen(false); promptInstall(); }} className="w-full flex items-center gap-3 px-4 py-3 text-[15px] active:bg-wa-panel">
                 <Download size={18} /> Instalar app
-              </button>
-            )}
-            {notifState === 'default' && (
-              <button
-                onClick={async () => {
-                  setMenuOpen(false);
-                  const r = await enableNotifications();
-                  setNotifState(r);
-                  if (r === 'granted') toast.success('Notificaciones activadas');
-                }}
-                className="w-full flex items-center gap-3 px-4 py-3 text-[15px] active:bg-wa-panel"
-              >
-                <Bell size={18} /> Activar notificaciones
               </button>
             )}
             <button onClick={logout} className="w-full flex items-center gap-3 px-4 py-3 text-[15px] active:bg-wa-panel">
