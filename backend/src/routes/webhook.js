@@ -536,6 +536,16 @@ async function processStatusUpdate(status) {
   const validStatuses = ['sent', 'delivered', 'read', 'failed'];
   if (!validStatuses.includes(newStatus)) return;
 
+  // Los rechazos de Meta llegan acá (asincrónicos): siempre dejarlos en el log con el motivo
+  if (newStatus === 'failed') {
+    const errs = (status.errors || [])
+      .map((e) => `${e.code} ${e.title || ''}${e.error_data?.details ? ` — ${e.error_data.details}` : ''}`)
+      .join(' | ');
+    console.warn(`[Webhook] ❌ Meta rechazó el mensaje ${waMessageId} a ${recipient_id}: ${errs || 'sin detalle'}`);
+  } else {
+    console.log(`[Webhook] Estado ${newStatus} — ${waMessageId} (${recipient_id})`);
+  }
+
   // Buscar el log por el ID de mensaje de WhatsApp
   const logResult = await query(
     'SELECT id, campaign_id, status FROM waba_message_logs WHERE whatsapp_message_id = $1',

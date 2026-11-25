@@ -25,6 +25,15 @@ const upload = multer({
 
 const router = Router();
 
+/** Mensaje entendible para el vendedor a partir del error de Meta */
+function whatsappErrorMessage(err) {
+  const e = err.response?.data?.error;
+  if (e?.code === 131047 || /re-engagement/i.test(e?.message || '')) {
+    return 'La ventana de 24 h está cerrada: el cliente tiene que escribirte primero o usá una plantilla';
+  }
+  return `WhatsApp no aceptó el mensaje: ${e?.error_data?.details || e?.message || err.message}`;
+}
+
 const META_API_VERSION = 'v21.0';
 const META_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
 
@@ -114,10 +123,10 @@ router.post('/conversations/:id/messages', async (req, res) => {
       waMessageId = waRes.data?.messages?.[0]?.id;
       console.log(`[Inbox] Mensaje enviado por WhatsApp a ${telefono} (msgId: ${waMessageId})`);
     } catch (waErr) {
-      // Si WhatsApp falla (ej: ventana de 24h cerrada), igual registramos en Chatwoot
-      const waError = waErr.response?.data?.error?.message || waErr.message;
-      console.warn(`[Inbox] WhatsApp send falló para ${telefono}: ${waError}`);
-      // No cortamos el flujo: el mensaje se guarda en Chatwoot de todos modos
+      // Si WhatsApp lo rechaza (ej: ventana de 24 h cerrada) NO se registra como enviado:
+      // se avisa al usuario para que no crea que el cliente lo recibió.
+      console.warn(`[Inbox] WhatsApp send falló para ${telefono}:`, JSON.stringify(waErr.response?.data?.error || waErr.message));
+      return res.status(502).json({ success: false, error: whatsappErrorMessage(waErr) });
     }
 
     // 2. Registrar el mensaje como 'outgoing' en Chatwoot
@@ -283,9 +292,8 @@ router.post('/conversations/:id/media', upload.single('file'), async (req, res) 
       waMessageId = await sendMediaMessage(telefono, mediaType, mediaId, caption, originalname);
       console.log(`[Inbox] Media enviado por WhatsApp a ${telefono} (msgId: ${waMessageId})`);
     } catch (waErr) {
-      const waError = waErr.response?.data?.error?.message || waErr.message;
-      console.warn(`[Inbox] WhatsApp media send falló para ${telefono}: ${waError}`);
-      // No cortamos el flujo: registramos en Chatwoot de todos modos
+      console.warn(`[Inbox] WhatsApp media send falló para ${telefono}:`, JSON.stringify(waErr.response?.data?.error || waErr.message));
+      return res.status(502).json({ success: false, error: whatsappErrorMessage(waErr) });
     }
 
     // 3. Registrar en Chatwoot como mensaje saliente (texto descriptivo + caption si hay)
@@ -334,14 +342,13 @@ router.post('/conversations/:id/audio', upload.single('file'), async (req, res) 
     }
 
     let waMessageId = null;
-    let waError = null;
     try {
       const mediaId = await uploadMediaToMeta(ogg, 'audio/ogg', 'nota_de_voz.ogg');
       waMessageId = await sendMediaMessage(telefono, 'audio', mediaId);
       console.log(`[Inbox] Nota de voz enviada a ${telefono} (msgId: ${waMessageId})`);
     } catch (waErr) {
-      waError = waErr.response?.data?.error?.message || waErr.message;
-      console.warn(`[Inbox] WhatsApp audio send falló para ${telefono}: ${waError}`);
+      console.warn(`[Inbox] WhatsApp audio send falló para ${telefono}:`, JSON.stringify(waErr.response?.data?.error || waErr.message));
+      return res.status(502).json({ success: false, error: whatsappErrorMessage(waErr) });
     }
 
     // 2. Guardar en Chatwoot como adjunto reproducible (m4a), para poder escucharlo en la bandeja
@@ -356,10 +363,6 @@ router.post('/conversations/:id/audio', upload.single('file'), async (req, res) 
       console.warn('[Inbox] No se pudo convertir a m4a, se guarda ogg:', convErr.message);
     }
     const chatwootMsg = await sendAttachmentToConversation(conversationId, audioForInbox, name, mime, 'outgoing');
-
-    if (!waMessageId) {
-      return res.status(502).json({ success: false, error: `WhatsApp no aceptó el audio: ${waError}` });
-    }
     res.json({ success: true, data: { chatwoot_message_id: chatwootMsg?.id, whatsapp_message_id: waMessageId } });
   } catch (err) {
     console.error('[Inbox] POST audio error:', err.response?.data || err.message);
