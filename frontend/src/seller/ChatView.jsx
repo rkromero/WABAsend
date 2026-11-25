@@ -5,7 +5,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowLeft, MoreVertical, Phone, Paperclip, Send, Bot, ChevronDown, Image as ImageIcon,
-  Camera, FileText, ShoppingBag, Zap, Tag, X, UserCheck, AlertTriangle, Check,
+  Camera, FileText, ShoppingBag, Zap, Tag, X, UserCheck, AlertTriangle, Check, Mic, Trash2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../lib/api.js';
@@ -13,6 +13,7 @@ import { usePolling } from '../hooks/usePolling.js';
 import { Avatar, Sheet, Spinner } from './ui.jsx';
 import MessageBubble from './MessageBubble.jsx';
 import { ProductPicker } from './ProductsView.jsx';
+import useVoiceRecorder, { fmtSeconds } from './useVoiceRecorder.js';
 import { contactOf, dayKey, dayLabel, isOutgoing, productMessage } from './waUtils.js';
 
 const PRESET_TAGS = ['urgente', 'reclamo', 'presupuesto', 'pedido', 'seguimiento'];
@@ -40,6 +41,7 @@ export default function ChatView({ conversations, tags, setTags, markRead, refre
   const [caption, setCaption] = useState('');
   const [showDown, setShowDown] = useState(false);
   const [newTag, setNewTag] = useState('');
+  const { recording, startRecording, finishRecording } = useVoiceRecorder((blob, type) => sendAudio(blob, type));
 
   const scrollRef = useRef(null);
   const atBottom = useRef(true);
@@ -187,6 +189,27 @@ export default function ChatView({ conversations, tags, setTags, markRead, refre
     }
   }
 
+
+  async function sendAudio(blob, type) {
+    const ext = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm';
+    const temp = { id: `tmp-${Date.now()}`, content: '🎤 Enviando nota de voz…', message_type: 1, status: 'progress', created_at: Date.now() / 1000 };
+    setPending((p) => [...p, temp]);
+    atBottom.current = true;
+    try {
+      if (botPaused === false) await setBot(true, true);
+      const fd = new FormData();
+      fd.append('file', blob, `nota.${ext}`);
+      await api.post(`/inbox/conversations/${convId}/audio`, fd, { headers: { 'Content-Type': undefined }, timeout: 90000 });
+      await fetchMessages();
+      refreshList();
+    } catch (err) {
+      toast.error(err.message || 'No se pudo enviar el audio');
+      await fetchMessages();
+    } finally {
+      setPending((p) => p.filter((m) => m.id !== temp.id));
+    }
+  }
+
   async function openQuick() {
     setSheet('quick');
     if (quickReplies) return;
@@ -306,6 +329,16 @@ export default function ChatView({ conversations, tags, setTags, markRead, refre
 
       {/* Composer */}
       <div className="shrink-0 flex items-end gap-1.5 px-1.5 pt-1.5 pb-1.5 wa-wallpaper wa-safe-bottom">
+        {recording !== null ? (
+          <div className="flex-1 flex items-center gap-3 h-12 px-2 rounded-[24px] bg-wa-input shadow-[0_1px_0.5px_rgba(0,0,0,0.1)]">
+            <button onClick={() => finishRecording(false)} className="p-2 text-wa-sub" aria-label="Descartar audio">
+              <Trash2 size={22} />
+            </button>
+            <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+            <span className="text-[16px] tabular-nums">{fmtSeconds(recording)}</span>
+            <span className="flex-1 text-[14px] text-wa-sub truncate">Grabando…</span>
+          </div>
+        ) : (
         <div className="flex-1 flex items-end min-h-[48px] rounded-[24px] bg-wa-input shadow-[0_1px_0.5px_rgba(0,0,0,0.1)]">
           <button onClick={openQuick} className="p-3 text-wa-sub shrink-0" aria-label="Respuestas rápidas">
             <Zap size={22} />
@@ -327,14 +360,33 @@ export default function ChatView({ conversations, tags, setTags, markRead, refre
             </button>
           )}
         </div>
-        <button
-          onClick={handleSend}
-          disabled={!text.trim() || sending}
-          className="w-12 h-12 shrink-0 rounded-full bg-wa-green text-white flex items-center justify-center shadow-md disabled:opacity-60 active:scale-95 transition-transform"
-          aria-label="Enviar"
-        >
-          <Send size={20} className="ml-0.5" />
-        </button>
+        )}
+        {recording !== null ? (
+          <button
+            onClick={() => finishRecording(true)}
+            className="w-12 h-12 shrink-0 rounded-full bg-wa-green text-white flex items-center justify-center shadow-md active:scale-95 transition-transform"
+            aria-label="Enviar audio"
+          >
+            <Send size={20} className="ml-0.5" />
+          </button>
+        ) : text.trim() ? (
+          <button
+            onClick={handleSend}
+            disabled={sending}
+            className="w-12 h-12 shrink-0 rounded-full bg-wa-green text-white flex items-center justify-center shadow-md disabled:opacity-60 active:scale-95 transition-transform"
+            aria-label="Enviar"
+          >
+            <Send size={20} className="ml-0.5" />
+          </button>
+        ) : (
+          <button
+            onClick={startRecording}
+            className="w-12 h-12 shrink-0 rounded-full bg-wa-green text-white flex items-center justify-center shadow-md active:scale-95 transition-transform"
+            aria-label="Grabar nota de voz"
+          >
+            <Mic size={22} />
+          </button>
+        )}
       </div>
 
       {/* Inputs de archivos ocultos */}

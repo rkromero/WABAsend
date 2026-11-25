@@ -22,6 +22,7 @@ import { shouldBotRespond, generateBotResponse, sanitizeBotResponse } from '../s
 import { sendFreeTextMessage, getMediaUrl, downloadMediaBuffer, transcribeAudio } from '../services/whatsapp.js';
 import { getConversationHistory, saveConversationTurn } from '../services/conversationMemory.js';
 import { autoTagConversation } from '../services/autoTagger.js';
+import { toM4a } from '../services/audio.js';
 import { scheduleDebounce } from '../services/messageDebounce.js';
 
 const router = Router();
@@ -389,12 +390,24 @@ async function processIncomingMedia({ telefono, nombre, waMessageId, msg }) {
 
     // Imagen / video / documento → subir como ADJUNTO real para que se vea en la bandeja.
     // (El frontend renderiza attachment.data_url; un mensaje de solo texto no muestra nada.)
-    // Audio → se mantiene como texto; la transcripción se envía aparte en el bloque del bot.
-    const isAttachable = ['image', 'video', 'document'].includes(mediaType);
+    // Audio → se adjunta convertido a m4a (iPhone no reproduce el ogg/opus de WhatsApp);
+    // si la conversión falla se adjunta el original. La transcripción sigue su curso aparte.
+    const isAttachable = ['image', 'video', 'document', 'audio'].includes(mediaType);
     if (isAttachable && mediaBuffer) {
-      const safeName = filename || `${mediaType}_${waMessageId || Date.now()}.${extFromMime(mediaMime)}`;
+      let attBuffer = mediaBuffer;
+      let attMime = mediaMime;
+      let safeName = filename || `${mediaType}_${waMessageId || Date.now()}.${extFromMime(mediaMime)}`;
+      if (mediaType === 'audio') {
+        try {
+          attBuffer = await toM4a(mediaBuffer);
+          attMime = 'audio/mp4';
+          safeName = `audio_${waMessageId || Date.now()}.m4a`;
+        } catch (convErr) {
+          console.warn('[Webhook] No se pudo convertir audio a m4a, se adjunta original:', convErr.message);
+        }
+      }
       try {
-        await sendAttachmentToConversation(conversation.id, mediaBuffer, safeName, mediaMime, 'incoming', caption);
+        await sendAttachmentToConversation(conversation.id, attBuffer, safeName, attMime, 'incoming', caption);
         console.log(`[Webhook] Media entrante de ${telefono} (${mediaType}) adjuntado en Chatwoot`);
       } catch (attErr) {
         // Si la subida del adjunto falla, dejamos al menos el texto descriptivo

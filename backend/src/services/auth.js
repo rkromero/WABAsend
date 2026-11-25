@@ -148,7 +148,7 @@ export async function requireAuth(req, res, next) {
 const VENDEDOR_ALLOWED = [
   { method: 'GET', re: /^\/inbox\/conversations\/?$/ },
   { method: 'GET', re: /^\/inbox\/conversations\/\d+\/(messages|bot-status)$/ },
-  { method: 'POST', re: /^\/inbox\/conversations\/\d+\/(messages|media|read|takeover|release|tags)$/ },
+  { method: 'POST', re: /^\/inbox\/conversations\/\d+\/(messages|media|audio|read|takeover|release|tags)$/ },
   { method: 'DELETE', re: /^\/inbox\/conversations\/\d+\/tags\/[^/]+$/ },
   { method: 'GET', re: /^\/inbox\/(tags|quick-replies)$/ },
   { method: 'GET', re: /^\/products\/?$/ },

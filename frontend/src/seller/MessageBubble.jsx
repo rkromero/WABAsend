@@ -6,6 +6,7 @@ import React from 'react';
 import { FileText, Download } from 'lucide-react';
 import { Ticks } from './ui.jsx';
 import { msgTime, isOutgoing } from './waUtils.js';
+import AudioPlayer from './AudioPlayer.jsx';
 
 const TOKEN_RE = /(https?:\/\/[^\s]+|\*[^*\n]+\*|_[^_\n]+_|~[^~\n]+~)/g;
 
@@ -27,7 +28,7 @@ export function FormattedText({ text }) {
   });
 }
 
-function Attachment({ att }) {
+function Attachment({ att, out }) {
   const url = att.data_url || att.file_url || '';
   const type = att.file_type || '';
   if (!url) return null;
@@ -43,7 +44,7 @@ function Attachment({ att }) {
     return <video src={url} controls playsInline className="rounded-md w-full max-h-80 -mt-1 mb-1 bg-black" />;
   }
   if (type === 'audio') {
-    return <audio src={url} controls className="w-60 max-w-full my-1" />;
+    return <AudioPlayer url={url} out={out} />;
   }
   const name = att.file_name || decodeURIComponent(url.split('/').pop()?.split('?')[0] || 'Documento');
   return (
@@ -73,7 +74,7 @@ export default function MessageBubble({ msg, firstOfGroup }) {
           out ? 'bg-wa-out' : 'bg-wa-in'
         } ${firstOfGroup ? (out ? 'wa-tail-out' : 'wa-tail-in') : ''}`}
       >
-        {atts.map((a) => <Attachment key={a.id || a.data_url} att={a} />)}
+        {atts.map((a) => <Attachment key={a.id || a.data_url} att={a} out={out} />)}
         {hasText ? (
           <p className="text-[15px] leading-[1.35] whitespace-pre-wrap break-words px-0.5">
             <FormattedText text={msg.content} />

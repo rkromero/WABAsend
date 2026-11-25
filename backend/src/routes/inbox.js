@@ -10,7 +10,8 @@
 
 import { Router } from 'express';
 import multer from 'multer';
-import { getConversations, getMessages, sendMessageToConversation, getConversation, markConversationAsRead, resolveConversation, deleteConversation } from '../services/chatwoot.js';
+import { getConversations, getMessages, sendMessageToConversation, sendAttachmentToConversation, getConversation, markConversationAsRead, resolveConversation, deleteConversation } from '../services/chatwoot.js';
+import { toOggOpus, toM4a } from '../services/audio.js';
 import { getConfig, uploadMediaToMeta, sendMediaMessage } from '../services/whatsapp.js';
 import { query } from '../db/index.js';
 import { clearConversationHistory } from '../services/conversationMemory.js';
@@ -305,6 +306,63 @@ router.post('/conversations/:id/media', upload.single('file'), async (req, res) 
     });
   } catch (err) {
     console.error('[Inbox] POST media error:', err.response?.data || err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/inbox/conversations/:id/audio — nota de voz grabada desde el navegador
+// Body: multipart/form-data con campo 'file' (webm/opus de Chrome, mp4/aac de Safari, etc.)
+router.post('/conversations/:id/audio', upload.single('file'), async (req, res) => {
+  const conversationId = parseInt(req.params.id);
+  if (isNaN(conversationId)) {
+    return res.status(400).json({ success: false, error: 'ID de conversación inválido' });
+  }
+  if (!req.file?.buffer?.length) {
+    return res.status(400).json({ success: false, error: 'No se recibió el audio' });
+  }
+
+  try {
+    const telefono = await getTelefonoFromConversation(conversationId);
+
+    // 1. Convertir a ogg/opus (formato de nota de voz de WhatsApp) y enviar
+    let ogg;
+    try {
+      ogg = await toOggOpus(req.file.buffer);
+    } catch (convErr) {
+      console.error('[Inbox] No se pudo convertir el audio:', convErr.message);
+      return res.status(422).json({ success: false, error: 'No se pudo procesar el audio grabado' });
+    }
+
+    let waMessageId = null;
+    let waError = null;
+    try {
+      const mediaId = await uploadMediaToMeta(ogg, 'audio/ogg', 'nota_de_voz.ogg');
+      waMessageId = await sendMediaMessage(telefono, 'audio', mediaId);
+      console.log(`[Inbox] Nota de voz enviada a ${telefono} (msgId: ${waMessageId})`);
+    } catch (waErr) {
+      waError = waErr.response?.data?.error?.message || waErr.message;
+      console.warn(`[Inbox] WhatsApp audio send falló para ${telefono}: ${waError}`);
+    }
+
+    // 2. Guardar en Chatwoot como adjunto reproducible (m4a), para poder escucharlo en la bandeja
+    let audioForInbox = ogg;
+    let mime = 'audio/ogg';
+    let name = 'nota_de_voz.ogg';
+    try {
+      audioForInbox = await toM4a(req.file.buffer);
+      mime = 'audio/mp4';
+      name = 'nota_de_voz.m4a';
+    } catch (convErr) {
+      console.warn('[Inbox] No se pudo convertir a m4a, se guarda ogg:', convErr.message);
+    }
+    const chatwootMsg = await sendAttachmentToConversation(conversationId, audioForInbox, name, mime, 'outgoing');
+
+    if (!waMessageId) {
+      return res.status(502).json({ success: false, error: `WhatsApp no aceptó el audio: ${waError}` });
+    }
+    res.json({ success: true, data: { chatwoot_message_id: chatwootMsg?.id, whatsapp_message_id: waMessageId } });
+  } catch (err) {
+    console.error('[Inbox] POST audio error:', err.response?.data || err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
