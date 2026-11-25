@@ -1,51 +1,28 @@
-import React from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import Sidebar from './components/Sidebar.jsx';
-import Dashboard from './pages/Dashboard.jsx';
-import Templates from './pages/Templates.jsx';
-import Contacts from './pages/Contacts.jsx';
-import Campaigns from './pages/Campaigns.jsx';
-import CampaignDetail from './pages/CampaignDetail.jsx';
-import Settings from './pages/Settings.jsx';
-import Inbox from './pages/Inbox.jsx';
-import Bot from './pages/Bot.jsx';
-import Products from './pages/Products.jsx';
-import Automations from './pages/Automations.jsx';
-import Knowledge from './pages/Knowledge.jsx';
-import Analytics from './pages/Analytics.jsx';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
+import Login from './pages/Login.jsx';
+import api from './lib/api.js';
+import { getToken, getStoredUser, saveSession } from './lib/auth.js';
+
+// Carga diferida: el vendedor (celular) no descarga el panel admin y viceversa
+const AdminApp = lazy(() => import('./AdminApp.jsx'));
+const SellerApp = lazy(() => import('./seller/SellerApp.jsx'));
 
 export default function App() {
-  const location = useLocation();
-  // El inbox ocupa toda la pantalla — no queremos el padding del layout
-  const isInbox = location.pathname === '/inbox';
+  const [user, setUser] = useState(() => (getToken() ? getStoredUser() : null));
 
+  // Revalida la sesión al abrir (rol actualizado, usuario desactivado, etc.)
+  useEffect(() => {
+    const token = getToken();
+    if (!token) return;
+    api.get('/auth/me')
+      .then((res) => { saveSession(token, res.data); setUser(res.data); })
+      .catch(() => { /* 401 → logout automático en api.js; error de red → sigue con la sesión guardada */ });
+  }, []);
+
+  if (!user) return <Login onLogin={setUser} />;
   return (
-    <div className="flex h-screen overflow-hidden bg-base font-body">
-      <Sidebar />
-      <main className={`flex-1 ${isInbox ? 'overflow-hidden flex flex-col' : 'overflow-y-auto'}`}>
-        {isInbox ? (
-          <Routes>
-            <Route path="/inbox" element={<Inbox />} />
-          </Routes>
-        ) : (
-          <div className="min-h-full p-6 lg:p-8">
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/templates" element={<Templates />} />
-              <Route path="/contacts" element={<Contacts />} />
-              <Route path="/campaigns" element={<Campaigns />} />
-              <Route path="/campaigns/:id" element={<CampaignDetail />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/bot" element={<Bot />} />
-              <Route path="/products" element={<Products />} />
-              <Route path="/automations" element={<Automations />} />
-              <Route path="/knowledge" element={<Knowledge />} />
-              <Route path="/analytics" element={<Analytics />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </div>
-        )}
-      </main>
-    </div>
+    <Suspense fallback={<div className="fixed inset-0 bg-base" />}>
+      {user.rol === 'vendedor' ? <SellerApp user={user} /> : <AdminApp />}
+    </Suspense>
   );
 }

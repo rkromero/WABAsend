@@ -13,7 +13,10 @@ import {
   Zap,
   BookOpen,
   TrendingUp,
+  UserCog,
+  LogOut,
 } from 'lucide-react';
+import { logout, getStoredUser } from '../lib/auth.js';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -26,6 +29,7 @@ const navItems = [
   { to: '/products', icon: ShoppingBag, label: 'Productos' },
   { to: '/contacts', icon: Users, label: 'Contactos' },
   { to: '/templates', icon: FileText, label: 'Plantillas' },
+  { to: '/users', icon: UserCog, label: 'Usuarios' },
   { to: '/settings', icon: Settings, label: 'Configuración' },
 ];
 
@@ -69,11 +73,18 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="px-5 py-4 border-t border-base-border">
+      <div className="px-5 py-4 border-t border-base-border space-y-3">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-accent animate-pulse-subtle" />
           <span className="text-xs text-gray-500">Sistema activo</span>
         </div>
+        <button
+          onClick={logout}
+          className="w-full flex items-center gap-2 text-xs text-gray-500 hover:text-gray-200 transition-colors"
+          title={getStoredUser()?.usuario ? `@${getStoredUser().usuario}` : ''}
+        >
+          <LogOut size={14} /> Cerrar sesión
+        </button>
       </div>
     </aside>
   );

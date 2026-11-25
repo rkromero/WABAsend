@@ -31,11 +31,16 @@ import knowledgeRouter from './routes/knowledge.js';
 import optoutsRouter from './routes/optouts.js';
 import analyticsRouter from './routes/analytics.js';
 import viccaJourneyRouter from './routes/viccaJourney.js';
+import authRouter from './routes/auth.js';
+import { initAuth, requireAuth, enforceRole } from './services/auth.js';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Railway corre detrás de un proxy — necesario para req.ip (rate limit del login)
+app.set('trust proxy', 1);
 
 // --- Middlewares de seguridad y parsing ---
 app.use(helmet());
@@ -82,21 +87,27 @@ app.get('/health', (req, res) => {
   res.json({ success: true, data: { status: 'ok', timestamp: new Date().toISOString() } });
 });
 
+// Rutas públicas (webhooks externos con su propia validación + login)
+app.use('/api/auth', authRouter);
+app.use('/api/chatwoot', chatwootWebhookRouter);
+app.use('/api/woo-webhook', wooWebhookRouter);
+app.use('/api/vicca', viccaJourneyRouter);
+app.use('/webhook', webhookRouter);
+
+// Todo lo demás bajo /api requiere sesión; el vendedor solo accede a bandeja y productos
+app.use('/api', requireAuth, enforceRole);
+
 app.use('/api/config', configRouter);
 app.use('/api/templates', templatesRouter);
 app.use('/api/contacts', contactsRouter);
 app.use('/api/campaigns', campaignsRouter);
 app.use('/api/inbox', inboxRouter);
-app.use('/api/chatwoot', chatwootWebhookRouter);
 app.use('/api/bot', botRouter);
 app.use('/api/products', productsRouter);
 app.use('/api/automations', automationsRouter);
-app.use('/api/woo-webhook', wooWebhookRouter);
 app.use('/api/knowledge', knowledgeRouter);
 app.use('/api/optouts', optoutsRouter);
 app.use('/api/analytics', analyticsRouter);
-app.use('/api/vicca', viccaJourneyRouter);
-app.use('/webhook', webhookRouter);
 
 // --- Manejo global de errores ---
 app.use((err, req, res, _next) => {
@@ -110,6 +121,7 @@ async function start() {
 
   try {
     await initSchema();
+    await initAuth();
     console.log('[Server] Base de datos lista');
   } catch (err) {
     console.error('[Server] Error al inicializar la base de datos:', err.message);

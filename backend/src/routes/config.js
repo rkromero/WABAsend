@@ -15,6 +15,8 @@ router.get('/', async (req, res) => {
     const result = await query('SELECT key, value FROM config');
     const config = {};
     for (const row of result.rows) {
+      // Claves internas (ej: _AUTH_SECRET) nunca se exponen
+      if (row.key.startsWith('_')) continue;
       // Ocultar parte del token por seguridad en la UI
       if (row.key === 'WHATSAPP_TOKEN' && row.value) {
         config[row.key] = row.value.substring(0, 8) + '...' + row.value.slice(-4);

@@ -18,6 +18,25 @@ export default {
           subtle: 'rgba(37,211,102,0.12)',
           glow: 'rgba(37,211,102,0.25)',
         },
+        // App del vendedor — look & feel WhatsApp (valores en CSS vars, con modo oscuro)
+        wa: {
+          bg: 'var(--wa-bg)',
+          panel: 'var(--wa-panel)',
+          chat: 'var(--wa-chat)',
+          text: 'var(--wa-text)',
+          sub: 'var(--wa-sub)',
+          green: 'var(--wa-green)',
+          title: 'var(--wa-title)',
+          out: 'var(--wa-out)',
+          in: 'var(--wa-in)',
+          input: 'var(--wa-input)',
+          line: 'var(--wa-line)',
+          chip: 'var(--wa-chip)',
+          chipon: 'var(--wa-chip-on)',
+          chiptext: 'var(--wa-chip-text)',
+          sys: 'var(--wa-sys)',
+          blue: 'var(--wa-blue)',
+        },
         // Semánticos para estados de mensaje
         status: {
           sent: '#6B7280',      // gris
