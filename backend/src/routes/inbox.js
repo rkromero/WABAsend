@@ -12,7 +12,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { getConversations, getMessages, sendMessageToConversation, sendAttachmentToConversation, getConversation, markConversationAsRead, resolveConversation, deleteConversation } from '../services/chatwoot.js';
 import { toOggOpus, toM4a } from '../services/audio.js';
-import { getConfig, uploadMediaToMeta, sendMediaMessage } from '../services/whatsapp.js';
+import { getConfig, uploadMediaToMeta, sendMediaMessage, fetchTemplates, sendTemplateMessage } from '../services/whatsapp.js';
 import { query } from '../db/index.js';
 import { clearConversationHistory } from '../services/conversationMemory.js';
 import axios from 'axios';
@@ -363,6 +363,100 @@ router.post('/conversations/:id/audio', upload.single('file'), async (req, res) 
     res.json({ success: true, data: { chatwoot_message_id: chatwootMsg?.id, whatsapp_message_id: waMessageId } });
   } catch (err) {
     console.error('[Inbox] POST audio error:', err.response?.data || err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── Plantillas para reabrir la ventana de 24 h ─────────────────────────────
+
+const VAR_RE = /\{\{\s*(\d+)\s*\}\}/g;
+let templatesCache = { at: 0, data: null };
+
+/**
+ * Plantillas aprobadas que se pueden enviar desde el chat: solo variables en el
+ * cuerpo (sin encabezado multimedia ni variables en encabezado/botones, que el
+ * envío actual no soporta). Caché de 5 minutos para no consultar Meta en cada apertura.
+ */
+async function getUsableTemplates() {
+  if (templatesCache.data && Date.now() - templatesCache.at < 5 * 60 * 1000) return templatesCache.data;
+  const all = await fetchTemplates();
+  const usable = [];
+  for (const t of all) {
+    if (t.status !== 'APPROVED') continue;
+    const comps = t.components || [];
+    const header = comps.find((c) => c.type === 'HEADER');
+    const body = comps.find((c) => c.type === 'BODY');
+    const footer = comps.find((c) => c.type === 'FOOTER');
+    const buttons = comps.find((c) => c.type === 'BUTTONS')?.buttons || [];
+    if (!body?.text) continue;
+    if (header && (header.format !== 'TEXT' || VAR_RE.test(header.text || ''))) continue;
+    VAR_RE.lastIndex = 0;
+    if (buttons.some((b) => /\{\{/.test(b.url || ''))) continue;
+    const vars = new Set([...body.text.matchAll(VAR_RE)].map((m) => Number(m[1])));
+    usable.push({
+      name: t.name,
+      language: t.language,
+      category: t.category,
+      header: header?.text || '',
+      body: body.text,
+      footer: footer?.text || '',
+      buttons: buttons.map((b) => b.text).filter(Boolean),
+      varCount: vars.size ? Math.max(...vars) : 0,
+    });
+  }
+  usable.sort((a, b) => a.name.localeCompare(b.name));
+  templatesCache = { at: Date.now(), data: usable };
+  return usable;
+}
+
+function renderTemplate(t, params) {
+  const body = t.body.replace(VAR_RE, (_, n) => params[Number(n) - 1] ?? `{{${n}}}`);
+  return [t.header ? `*${t.header}*` : '', body, t.footer ? `_${t.footer}_` : ''].filter(Boolean).join('\n\n');
+}
+
+// GET /api/inbox/templates — plantillas aprobadas por Meta utilizables en el chat
+router.get('/templates', async (req, res) => {
+  try {
+    res.json({ success: true, data: await getUsableTemplates() });
+  } catch (err) {
+    console.error('[Inbox] GET templates error:', err.response?.data || err.message);
+    res.status(502).json({ success: false, error: 'No se pudieron obtener las plantillas de Meta' });
+  }
+});
+
+// POST /api/inbox/conversations/:id/template — enviar plantilla (reabre la conversación)
+// Body: { name, language, params: string[] }
+router.post('/conversations/:id/template', async (req, res) => {
+  const conversationId = parseInt(req.params.id);
+  if (isNaN(conversationId)) {
+    return res.status(400).json({ success: false, error: 'ID de conversación inválido' });
+  }
+  const { name, language } = req.body || {};
+  const params = Array.isArray(req.body?.params) ? req.body.params.map((p) => String(p ?? '').trim()) : [];
+
+  try {
+    const templates = await getUsableTemplates();
+    const tpl = templates.find((t) => t.name === name && t.language === language);
+    if (!tpl) return res.status(400).json({ success: false, error: 'Plantilla no disponible' });
+    if (params.length !== tpl.varCount || params.some((p) => !p)) {
+      return res.status(400).json({ success: false, error: 'Completá todas las variables de la plantilla' });
+    }
+
+    const telefono = await getTelefonoFromConversation(conversationId);
+    let messageId;
+    try {
+      ({ messageId } = await sendTemplateMessage(telefono, tpl.name, tpl.language, params));
+    } catch (waErr) {
+      const msg = waErr.response?.data?.error?.message || waErr.message;
+      console.warn(`[Inbox] Plantilla ${tpl.name} falló para ${telefono}: ${msg}`);
+      return res.status(502).json({ success: false, error: `WhatsApp rechazó la plantilla: ${msg}` });
+    }
+
+    console.log(`[Inbox] Plantilla ${tpl.name} enviada a ${telefono} por ${req.user?.usuario} (msgId: ${messageId})`);
+    const chatwootMsg = await sendMessageToConversation(conversationId, renderTemplate(tpl, params), 'outgoing');
+    res.json({ success: true, data: { whatsapp_message_id: messageId, chatwoot_message_id: chatwootMsg?.id } });
+  } catch (err) {
+    console.error('[Inbox] POST template error:', err.response?.data || err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });

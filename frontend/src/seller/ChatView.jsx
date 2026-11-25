@@ -5,7 +5,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowLeft, MoreVertical, Phone, Paperclip, Send, Bot, ChevronDown, Image as ImageIcon,
-  Camera, FileText, ShoppingBag, Zap, Tag, X, UserCheck, AlertTriangle, Check, Mic, Trash2,
+  Camera, FileText, ShoppingBag, Zap, Tag, UserCheck, Check, Mic, Trash2, Clock,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../lib/api.js';
@@ -14,6 +14,8 @@ import { Avatar, Sheet, Spinner } from './ui.jsx';
 import MessageBubble from './MessageBubble.jsx';
 import { ProductPicker } from './ProductsView.jsx';
 import useVoiceRecorder, { fmtSeconds } from './useVoiceRecorder.js';
+import TemplatePicker from './TemplatePicker.jsx';
+import MediaPreview from './MediaPreview.jsx';
 import { contactOf, dayKey, dayLabel, isOutgoing, productMessage } from './waUtils.js';
 
 const PRESET_TAGS = ['urgente', 'reclamo', 'presupuesto', 'pedido', 'seguimiento'];
@@ -113,10 +115,12 @@ export default function ChatView({ conversations, tags, setTags, markRead, refre
 
   // ── Ventana de 24 h de WhatsApp ──────────────────────────────────────────
   const windowClosed = useMemo(() => {
+    if (loading) return false;
     const lastIn = [...messages].reverse().find((m) => !isOutgoing(m));
-    if (!lastIn) return false;
+    // Sin mensajes del cliente (ej: chat iniciado por campaña) → solo se puede abrir con plantilla
+    if (!lastIn) return messages.length > 0;
     return Date.now() - lastIn.created_at * 1000 > DAY_MS;
-  }, [messages]);
+  }, [messages, loading]);
 
   // ── Acciones ─────────────────────────────────────────────────────────────
   async function setBot(paused, silent) {
@@ -320,14 +324,28 @@ export default function ChatView({ conversations, tags, setTags, markRead, refre
           <button onClick={() => setBot(true)} className="text-wa-green font-semibold px-2 py-1">Tomar</button>
         </div>
       )}
-      {windowClosed && (
-        <div className="shrink-0 flex items-start gap-2 px-3 py-2 bg-[#fff3c4] dark:bg-[#3a3000] text-[12.5px] text-[#6b5800] dark:text-[#ffd279]">
-          <AlertTriangle size={15} className="shrink-0 mt-px" />
-          <span>Pasaron más de 24 h desde el último mensaje del cliente: WhatsApp puede no entregar mensajes libres hasta que vuelva a escribir.</span>
+      {/* Ventana de 24 h vencida: composer grisado → plantillas */}
+      {windowClosed && recording === null ? (
+        <div className="shrink-0 flex items-end gap-1.5 px-1.5 pt-1.5 pb-1.5 wa-wallpaper wa-safe-bottom">
+          <button
+            onClick={() => setSheet('template')}
+            className="flex-1 flex items-center gap-3 min-h-[48px] px-4 rounded-[24px] bg-wa-panel border border-wa-line text-left active:opacity-80"
+          >
+            <Clock size={20} className="text-wa-sub shrink-0" />
+            <span className="flex-1 min-w-0 leading-tight py-1.5">
+              <span className="block text-[14.5px] text-wa-sub">Ventana vencida</span>
+              <span className="block text-[13px] font-semibold text-wa-green">Utilizar una plantilla</span>
+            </span>
+          </button>
+          <button
+            onClick={() => setSheet('template')}
+            className="w-12 h-12 shrink-0 rounded-full bg-wa-green text-white flex items-center justify-center shadow-md active:scale-95 transition-transform"
+            aria-label="Elegir plantilla"
+          >
+            <FileText size={21} />
+          </button>
         </div>
-      )}
-
-      {/* Composer */}
+      ) : (
       <div className="shrink-0 flex items-end gap-1.5 px-1.5 pt-1.5 pb-1.5 wa-wallpaper wa-safe-bottom">
         {recording !== null ? (
           <div className="flex-1 flex items-center gap-3 h-12 px-2 rounded-[24px] bg-wa-input shadow-[0_1px_0.5px_rgba(0,0,0,0.1)]">
@@ -388,6 +406,8 @@ export default function ChatView({ conversations, tags, setTags, markRead, refre
           </button>
         )}
       </div>
+
+      )}
 
       {/* Inputs de archivos ocultos */}
       <input ref={galleryRef} type="file" accept="image/*,video/*" className="hidden" onChange={pickFile} />
@@ -480,6 +500,15 @@ export default function ChatView({ conversations, tags, setTags, markRead, refre
         </div>
       </Sheet>
 
+      {/* Hoja: plantillas (ventana vencida) */}
+      <TemplatePicker
+        open={sheet === 'template'}
+        onClose={() => setSheet(null)}
+        convId={convId}
+        contactName={name}
+        onSent={() => { atBottom.current = true; fetchMessages(); refreshList(); }}
+      />
+
       {/* Hoja: selector de producto */}
       {sheet === 'product' && (
         <ProductPicker open onClose={() => setSheet(null)} onPick={(p) => insertDraft(productMessage(p))} />
@@ -487,39 +516,7 @@ export default function ChatView({ conversations, tags, setTags, markRead, refre
 
       {/* Vista previa de archivo antes de enviar */}
       {media && (
-        <div className="fixed inset-0 z-50 bg-black flex flex-col text-white">
-          <div className="flex items-center gap-3 p-2 wa-safe-top">
-            <button onClick={closeMedia} className="p-2 rounded-full active:bg-white/10"><X size={24} /></button>
-            <span className="truncate text-[15px]">{media.file.name}</span>
-          </div>
-          <div className="flex-1 flex items-center justify-center overflow-hidden p-2">
-            {media.type === 'image' && <img src={media.url} alt="" className="max-w-full max-h-full object-contain" />}
-            {media.type === 'video' && <video src={media.url} controls playsInline className="max-w-full max-h-full" />}
-            {media.type === 'document' && (
-              <div className="flex flex-col items-center gap-3 text-white/80">
-                <FileText size={72} strokeWidth={1.2} />
-                <span className="text-[15px] px-6 text-center break-all">{media.file.name}</span>
-                <span className="text-[13px] text-white/50">{(media.file.size / 1024).toFixed(0)} KB</span>
-              </div>
-            )}
-          </div>
-          <div className="flex items-end gap-2 p-2 wa-safe-bottom">
-            <input
-              value={caption}
-              onChange={(e) => setCaption(e.target.value)}
-              placeholder="Añade un comentario…"
-              className="flex-1 h-12 px-5 rounded-full bg-[#1f2c34] outline-none text-[16px] placeholder:text-white/50"
-            />
-            <button
-              onClick={sendMedia}
-              disabled={sending}
-              className="w-12 h-12 rounded-full bg-[#1daa61] flex items-center justify-center disabled:opacity-60"
-              aria-label="Enviar archivo"
-            >
-              {sending ? <div className="w-5 h-5 rounded-full border-2 border-white/40 border-t-white animate-spin" /> : <Send size={20} className="ml-0.5" />}
-            </button>
-          </div>
-        </div>
+        <MediaPreview media={media} caption={caption} setCaption={setCaption} sending={sending} onClose={closeMedia} onSend={sendMedia} />
       )}
     </div>
   );
