@@ -43,9 +43,24 @@ async function transcode(input, outExt, args) {
   }
 }
 
-/** Nota de voz para WhatsApp: ogg/opus mono 48 kHz */
-export function toOggOpus(buffer) {
-  return transcode(buffer, 'ogg', ['-ac', '1', '-ar', '48000', '-c:a', 'libopus', '-b:a', '32k', '-application', 'voip']);
+/** Decodifica a PCM (wav) limpio: descarta timestamps raros de las grabaciones del navegador */
+function toWav(buffer) {
+  return transcode(buffer, 'wav', ['-fflags', '+genpts', '-map_metadata', '-1', '-ac', '1', '-ar', '48000', '-c:a', 'pcm_s16le']);
+}
+
+/** Nota de voz para WhatsApp: ogg/opus mono 48 kHz, sin metadatos */
+export async function toOggOpus(buffer) {
+  const wav = await toWav(buffer);
+  return transcode(wav, 'ogg', [
+    '-map_metadata', '-1', '-ac', '1', '-ar', '48000',
+    '-c:a', 'libopus', '-b:a', '32k', '-vbr', 'on', '-application', 'voip', '-frame_duration', '20',
+  ]);
+}
+
+/** MP3 mono: formato de respaldo que Meta acepta siempre */
+export async function toMp3(buffer) {
+  const wav = await toWav(buffer);
+  return transcode(wav, 'mp3', ['-map_metadata', '-1', '-ac', '1', '-ar', '44100', '-c:a', 'libmp3lame', '-b:a', '64k']);
 }
 
 /** Audio reproducible en cualquier navegador: AAC en contenedor m4a */

@@ -12,6 +12,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { getConversations, getMessages, sendMessageToConversation, sendAttachmentToConversation, getConversation, markConversationAsRead, resolveConversation, deleteConversation } from '../services/chatwoot.js';
 import { toOggOpus, toM4a } from '../services/audio.js';
+import { rememberVoiceNote } from '../services/audioRetry.js';
 import { getConfig, uploadMediaToMeta, sendMediaMessage, fetchTemplates, sendTemplateMessage } from '../services/whatsapp.js';
 import { query } from '../db/index.js';
 import { clearConversationHistory } from '../services/conversationMemory.js';
@@ -346,6 +347,7 @@ router.post('/conversations/:id/audio', upload.single('file'), async (req, res) 
       const mediaId = await uploadMediaToMeta(ogg, 'audio/ogg; codecs=opus', 'nota_de_voz.ogg'); // Meta rechaza 'audio/ogg' base (131053)
       waMessageId = await sendMediaMessage(telefono, 'audio', mediaId);
       console.log(`[Inbox] Nota de voz enviada a ${telefono} (msgId: ${waMessageId})`);
+      rememberVoiceNote(waMessageId, telefono, req.file.buffer);
     } catch (waErr) {
       console.warn(`[Inbox] WhatsApp audio send falló para ${telefono}:`, JSON.stringify(waErr.response?.data?.error || waErr.message));
       return res.status(502).json({ success: false, error: whatsappErrorMessage(waErr) });

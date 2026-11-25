@@ -24,6 +24,7 @@ import { getConversationHistory, saveConversationTurn } from '../services/conver
 import { autoTagConversation } from '../services/autoTagger.js';
 import { toM4a } from '../services/audio.js';
 import { notifyIncomingMessage } from '../services/push.js';
+import { retryVoiceNoteIfRejected } from '../services/audioRetry.js';
 import { scheduleDebounce } from '../services/messageDebounce.js';
 
 const router = Router();
@@ -547,6 +548,8 @@ async function processStatusUpdate(status) {
       .map((e) => `${e.code} ${e.title || ''}${e.error_data?.details ? ` — ${e.error_data.details}` : ''}`)
       .join(' | ');
     console.warn(`[Webhook] ❌ Meta rechazó el mensaje ${waMessageId} a ${recipient_id}: ${errs || 'sin detalle'}`);
+    // Si era una nota de voz enviada desde la bandeja, se reintenta como MP3
+    retryVoiceNoteIfRejected(waMessageId, status.errors || []).catch(() => {});
   } else {
     console.log(`[Webhook] Estado ${newStatus} — ${waMessageId} (${recipient_id})`);
   }
