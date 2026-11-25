@@ -21,7 +21,7 @@ export default function App() {
 
   if (!user) return <Login onLogin={setUser} />;
   return (
-    <Suspense fallback={<div className="fixed inset-0 bg-base" />}>
+    <Suspense fallback={null}>
       {user.rol === 'vendedor' ? <SellerApp user={user} /> : <AdminApp />}
     </Suspense>
   );

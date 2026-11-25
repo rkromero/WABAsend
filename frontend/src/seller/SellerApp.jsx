@@ -6,7 +6,8 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import api from '../lib/api.js';
 import { usePolling } from '../hooks/usePolling.js';
-import { playNotificationSound } from './waUtils.js';
+import { playNotificationSound, contactOf } from './waUtils.js';
+import { setAppBadge, showLocalNotification } from '../lib/pwa.js';
 import ChatList from './ChatList.jsx';
 import ChatView from './ChatView.jsx';
 import ProductsView from './ProductsView.jsx';
@@ -17,6 +18,7 @@ export default function SellerApp({ user }) {
   const [error, setError] = useState(false);
   const [tags, setTags] = useState({});
   const prevUnread = useRef(null);
+  const prevByConv = useRef({});
 
   const fetchConversations = useCallback(async () => {
     try {
@@ -26,8 +28,19 @@ export default function SellerApp({ user }) {
       convs.sort((a, b) => (b.last_activity_at || 0) - (a.last_activity_at || 0));
 
       const unread = convs.reduce((s, c) => s + (parseInt(c.unread_count) || 0), 0);
-      if (prevUnread.current !== null && unread > prevUnread.current) playNotificationSound();
+      if (prevUnread.current !== null && unread > prevUnread.current) {
+        playNotificationSound();
+        // Notificación del sistema por cada chat con mensajes nuevos (si la app está en segundo plano)
+        convs
+          .filter((c) => (c.unread_count || 0) > (prevByConv.current[c.id] || 0))
+          .forEach((c) => {
+            const msg = c.last_non_activity_message;
+            const body = msg?.content || (msg?.attachments?.length ? '📎 Archivo adjunto' : 'Mensaje nuevo');
+            showLocalNotification(contactOf(c).name, body, `/chat/${c.id}`);
+          });
+      }
       prevUnread.current = unread;
+      prevByConv.current = Object.fromEntries(convs.map((c) => [c.id, c.unread_count || 0]));
 
       setConversations(convs);
       setError(false);
@@ -53,6 +66,7 @@ export default function SellerApp({ user }) {
 
   useEffect(() => {
     document.title = totalUnread > 0 ? `(${totalUnread}) Ventas` : 'Ventas';
+    setAppBadge(totalUnread);
   }, [totalUnread]);
 
   // Marca como leído de forma optimista

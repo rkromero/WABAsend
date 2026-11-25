@@ -5,8 +5,10 @@ import { Toaster } from 'react-hot-toast';
 import App from './App.jsx';
 import './index.css';
 import { installFetchAuth } from './lib/auth.js';
+import { registerPWA } from './lib/pwa.js';
 
 installFetchAuth();
+registerPWA();
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

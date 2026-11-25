@@ -3,7 +3,9 @@
  */
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, ArrowLeft, MoreVertical, LogOut, MessageCircle, Camera, FileText, Mic, Video } from 'lucide-react';
+import { Search, ArrowLeft, MoreVertical, LogOut, MessageCircle, Camera, FileText, Mic, Video, Download, Bell, Share, X } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { useInstallState, promptInstall, notificationsState, enableNotifications } from '../lib/pwa.js';
 import { logout } from '../lib/auth.js';
 import { Avatar, Ticks, BottomNav, Spinner } from './ui.jsx';
 import { contactOf, listTime, isOutgoing } from './waUtils.js';
@@ -26,6 +28,42 @@ function Preview({ msg, phone }) {
       {Icon && <Icon size={15} className="shrink-0" />}
       <span className="truncate">{msg.content || label || ''}</span>
     </span>
+  );
+}
+
+const DISMISS_KEY = 'wa_install_dismissed';
+
+/** Banner para instalar la app (Android: botón nativo / iOS: instrucciones) */
+function InstallBanner() {
+  const state = useInstallState();
+  const [hidden, setHidden] = useState(() => {
+    try { return localStorage.getItem(DISMISS_KEY) === '1'; } catch { return false; }
+  });
+  if (hidden || (state !== 'prompt' && state !== 'ios')) return null;
+  const dismiss = () => {
+    setHidden(true);
+    try { localStorage.setItem(DISMISS_KEY, '1'); } catch { /* noop */ }
+  };
+  return (
+    <div className="mx-3 mt-1 mb-2 flex items-center gap-3 rounded-xl bg-wa-chipon px-3 py-2.5 text-wa-chiptext">
+      <img src="/icon-192.png" alt="" className="w-10 h-10 rounded-xl shrink-0" />
+      <div className="flex-1 min-w-0 text-[13.5px] leading-snug">
+        <p className="font-semibold">Instalá Ventas en tu teléfono</p>
+        {state === 'ios' ? (
+          <p className="flex items-center flex-wrap gap-1">
+            Tocá <Share size={14} className="inline" /> <b>Compartir</b> y después <b>Agregar a inicio</b>
+          </p>
+        ) : (
+          <p>Abrila como una app, sin entrar al navegador.</p>
+        )}
+      </div>
+      {state === 'prompt' && (
+        <button onClick={promptInstall} className="shrink-0 px-3.5 h-9 rounded-full bg-wa-green text-white text-[14px] font-semibold">
+          Instalar
+        </button>
+      )}
+      <button onClick={dismiss} className="shrink-0 p-1 opacity-70" aria-label="Cerrar"><X size={18} /></button>
+    </div>
   );
 }
 
@@ -73,6 +111,8 @@ export default function ChatList({ conversations, loading, error, tags, user, un
   const [filter, setFilter] = useState('all');
   const [menuOpen, setMenuOpen] = useState(false);
   const searchRef = useRef(null);
+  const installState = useInstallState();
+  const [notifState, setNotifState] = useState(notificationsState);
 
   useEffect(() => { if (searching) searchRef.current?.focus(); }, [searching]);
 
@@ -150,7 +190,9 @@ export default function ChatList({ conversations, loading, error, tags, user, un
       <main className="flex-1 overflow-y-auto overscroll-contain">
         {loading ? (
           <div className="flex justify-center pt-16"><Spinner /></div>
-        ) : visible.length === 0 ? (
+        ) : null}
+        {!loading && <InstallBanner />}
+        {loading ? null : visible.length === 0 ? (
           <div className="flex flex-col items-center text-center px-10 pt-20 text-wa-sub">
             <MessageCircle size={48} strokeWidth={1.4} />
             <p className="mt-3 text-[15px]">
@@ -180,6 +222,24 @@ export default function ChatList({ conversations, loading, error, tags, user, un
               <p className="text-[15px] font-medium">{user?.nombre}</p>
               <p className="text-[13px] text-wa-sub">@{user?.usuario} · Vendedor</p>
             </div>
+            {installState === 'prompt' && (
+              <button onClick={() => { setMenuOpen(false); promptInstall(); }} className="w-full flex items-center gap-3 px-4 py-3 text-[15px] active:bg-wa-panel">
+                <Download size={18} /> Instalar app
+              </button>
+            )}
+            {notifState === 'default' && (
+              <button
+                onClick={async () => {
+                  setMenuOpen(false);
+                  const r = await enableNotifications();
+                  setNotifState(r);
+                  if (r === 'granted') toast.success('Notificaciones activadas');
+                }}
+                className="w-full flex items-center gap-3 px-4 py-3 text-[15px] active:bg-wa-panel"
+              >
+                <Bell size={18} /> Activar notificaciones
+              </button>
+            )}
             <button onClick={logout} className="w-full flex items-center gap-3 px-4 py-3 text-[15px] active:bg-wa-panel">
               <LogOut size={18} /> Cerrar sesión
             </button>

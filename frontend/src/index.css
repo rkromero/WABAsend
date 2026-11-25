@@ -12,7 +12,9 @@
   }
 
   body {
-    background-color: #0A0A0F;
+    /* Fondo inicial = el de la app del vendedor, para que no "flashee" al abrir la PWA.
+       El panel admin pinta su propio fondo oscuro (bg-base). */
+    background-color: #ffffff;
     color: #E5E7EB;
     font-family: 'DM Sans', sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -125,6 +127,7 @@
   -webkit-tap-highlight-color: transparent;
 }
 @media (prefers-color-scheme: dark) {
+  body { background-color: #0b141a; }
   .wa {
     --wa-bg: #0b141a;
     --wa-panel: #111b21;
@@ -166,3 +169,10 @@
 }
 .wa-sheet-in { animation: waSheet 0.22s ease-out; }
 @keyframes waSheet { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+/* Sensación de app nativa: sin rebote / pull-to-refresh, sin zoom por doble toque,
+   sin selección accidental en botones */
+html:has(.wa), html:has(.wa) body { overscroll-behavior: none; }
+.wa { touch-action: manipulation; }
+.wa button, .wa nav, .wa header { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.wa input, .wa textarea { -webkit-user-select: text; user-select: text; }

@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect } from 'react';
+import { setThemeColor } from './lib/pwa.js';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Sidebar from './components/Sidebar.jsx';
 import Dashboard from './pages/Dashboard.jsx';
@@ -17,6 +18,11 @@ import Users from './pages/Users.jsx';
 
 export default function AdminApp() {
   const location = useLocation();
+
+  useEffect(() => {
+    document.title = 'WABA Sender — Campañas WhatsApp';
+    setThemeColor('#0A0A0F');
+  }, []);
   // El inbox ocupa toda la pantalla — no queremos el padding del layout
   const isInbox = location.pathname === '/inbox';
 
