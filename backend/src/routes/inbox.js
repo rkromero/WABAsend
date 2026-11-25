@@ -343,7 +343,7 @@ router.post('/conversations/:id/audio', upload.single('file'), async (req, res) 
 
     let waMessageId = null;
     try {
-      const mediaId = await uploadMediaToMeta(ogg, 'audio/ogg', 'nota_de_voz.ogg');
+      const mediaId = await uploadMediaToMeta(ogg, 'audio/ogg; codecs=opus', 'nota_de_voz.ogg') // Meta rechaza 'audio/ogg' base (131053);
       waMessageId = await sendMediaMessage(telefono, 'audio', mediaId);
       console.log(`[Inbox] Nota de voz enviada a ${telefono} (msgId: ${waMessageId})`);
     } catch (waErr) {
